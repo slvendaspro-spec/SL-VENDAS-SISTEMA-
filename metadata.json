@@ -1,0 +1,6 @@
+{
+  "name": "SL VENDAS — Sistema Inteligente de Gestão e Vendas",
+  "description": "Sistema profissional de gestão multi-loja, controle de estoque em tempo real, PDV inteligente (M-Pesa, e-Mola, Dinheiro) e assistente de IA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
