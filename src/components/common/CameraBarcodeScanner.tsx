@@ -23,7 +23,10 @@ export const CameraBarcodeScanner: React.FC<CameraBarcodeScannerProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [manualCode, setManualCode] = useState('');
   const [isDetecting, setIsDetecting] = useState(false);
-  const [cameraActive, setCameraActive] = useState(false);
+  const [cameraActive, setCameraActive] = useState<boolean>(false);
+  const [hasTorch, setHasTorch] = useState<boolean>(false);
+  const [isTorchOn, setIsTorchOn] = useState<boolean>(false);
+  const [isMacroMode3cm, setIsMacroMode3cm] = useState<boolean>(true);
 
   // Common Mozambican supermarket product barcodes for quick test on desktop/tablet
   const quickTestCodes = [
@@ -34,6 +37,7 @@ export const CameraBarcodeScanner: React.FC<CameraBarcodeScannerProps> = ({
     { label: 'Sabão Azul 250g', code: '6009532004411' },
     { label: 'Arroz 25kg Extra', code: '7891005999999' },
     { label: 'Coca-Cola 330ml', code: '5449000000996' },
+    { label: 'Farinha de Milho 5kg', code: '6001234567890' },
   ];
 
   useEffect(() => {
@@ -48,6 +52,25 @@ export const CameraBarcodeScanner: React.FC<CameraBarcodeScannerProps> = ({
       stopCamera();
     };
   }, [isOpen]);
+
+  const toggleTorch = async () => {
+    if (!streamRef.current) return;
+    const videoTrack = streamRef.current.getVideoTracks()[0];
+    if (!videoTrack) return;
+
+    try {
+      const nextState = !isTorchOn;
+      // Torch API constraint
+      await (videoTrack as any).applyConstraints({
+        advanced: [{ torch: nextState }],
+      });
+      setIsTorchOn(nextState);
+      sound.beep();
+    } catch (e) {
+      console.warn('Erro ao alternar lanterna:', e);
+      setIsTorchOn(!isTorchOn);
+    }
+  };
 
   const startCamera = async () => {
     setErrorMessage(null);
@@ -72,6 +95,15 @@ export const CameraBarcodeScanner: React.FC<CameraBarcodeScannerProps> = ({
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
 
+      // Check for torch capability
+      const track = stream.getVideoTracks()[0];
+      if (track && (track.getCapabilities as any)) {
+        const capabilities = (track.getCapabilities as any)();
+        if (capabilities && capabilities.torch) {
+          setHasTorch(true);
+        }
+      }
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.setAttribute('playsinline', 'true'); // Required for iOS/Safari
@@ -95,11 +127,19 @@ export const CameraBarcodeScanner: React.FC<CameraBarcodeScannerProps> = ({
 
   const stopCamera = () => {
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current.getTracks().forEach((track) => {
+        try {
+          if (isTorchOn) {
+            (track as any).applyConstraints({ advanced: [{ torch: false }] });
+          }
+        } catch (e) {}
+        track.stop();
+      });
       streamRef.current = null;
     }
     setCameraActive(false);
     setIsDetecting(false);
+    setIsTorchOn(false);
   };
 
   const setupNativeBarcodeDetection = () => {
@@ -107,7 +147,7 @@ export const CameraBarcodeScanner: React.FC<CameraBarcodeScannerProps> = ({
     if ('BarcodeDetector' in window) {
       try {
         const barcodeDetector = new (window as any).BarcodeDetector({
-          formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code'],
+          formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code', 'itf'],
         });
 
         const detectLoop = async () => {
@@ -164,31 +204,68 @@ export const CameraBarcodeScanner: React.FC<CameraBarcodeScannerProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="relative w-full max-w-lg bg-slate-900 border border-slate-700/80 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
-        <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-orange-500/20 text-orange-400 border border-orange-500/30">
+        <div className="px-4 py-3 sm:px-5 sm:py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/80">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-orange-500/20 text-orange-400 border border-orange-500/30">
               <Camera className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-extrabold text-white text-base sm:text-lg leading-tight flex items-center gap-2">
-                {title}
+              <h3 className="font-extrabold text-white text-sm sm:text-base leading-tight flex items-center gap-1.5">
+                <span>{title}</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-500/30 font-mono">
+                  BEEP ON
+                </span>
               </h3>
-              <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">{subtitle}</p>
             </div>
           </div>
-          <button
-            onClick={() => {
-              stopCamera();
-              onClose();
-            }}
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+
+          <div className="flex items-center gap-1.5">
+            {/* Lanterna (Torch) Button */}
+            <button
+              type="button"
+              onClick={toggleTorch}
+              className={`p-2 rounded-xl text-xs font-bold flex items-center gap-1 transition-all border cursor-pointer ${
+                isTorchOn
+                  ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-lg shadow-amber-400/30 scale-105'
+                  : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700'
+              }`}
+              title="Ligar ou Desligar Lanterna do Telemóvel"
+            >
+              <Zap className={`w-4 h-4 ${isTorchOn ? 'fill-current' : ''}`} />
+              <span className="hidden sm:inline text-[11px]">{isTorchOn ? 'Lanterna LIGADA' : 'Lanterna'}</span>
+            </button>
+
+            {/* Foco Macro 3cm Button */}
+            <button
+              type="button"
+              onClick={() => setIsMacroMode3cm(!isMacroMode3cm)}
+              className={`p-2 rounded-xl text-xs font-bold flex items-center gap-1 transition-all border cursor-pointer ${
+                isMacroMode3cm
+                  ? 'bg-blue-600 text-white border-blue-400 shadow-md'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+              }`}
+              title="Modo Curta Distância (3cm)"
+            >
+              <span className="font-mono text-[11px]">3cm</span>
+              <span className="hidden sm:inline text-[11px]">{isMacroMode3cm ? 'Foco 3cm ON' : 'Macro'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                stopCamera();
+                onClose();
+              }}
+              className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Viewfinder Area */}
-        <div className="relative bg-black flex-1 min-h-[260px] max-h-[360px] flex items-center justify-center overflow-hidden">
+        <div className="relative bg-black flex-1 min-h-[220px] max-h-[320px] flex items-center justify-center overflow-hidden">
           {/* Live Video */}
           <video
             ref={videoRef}
@@ -202,19 +279,36 @@ export const CameraBarcodeScanner: React.FC<CameraBarcodeScannerProps> = ({
 
           {/* Scanner Overlay Laser & Target Reticle */}
           {cameraActive && (
-            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-              <div className="relative w-64 h-40 border-2 border-orange-500/80 rounded-2xl shadow-[0_0_20px_rgba(249,115,22,0.4)] overflow-hidden">
+            <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
+              <div
+                className={`relative border-2 rounded-2xl transition-all duration-300 overflow-hidden ${
+                  isMacroMode3cm
+                    ? 'w-72 h-44 border-orange-400 shadow-[0_0_25px_rgba(249,115,22,0.6)]'
+                    : 'w-60 h-36 border-orange-500/80 shadow-[0_0_15px_rgba(249,115,22,0.3)]'
+                }`}
+              >
                 {/* Corner markers */}
-                <div className="absolute top-0 left-0 w-4 h-4 border-t-4 border-l-4 border-orange-400 rounded-tl-sm" />
-                <div className="absolute top-0 right-0 w-4 h-4 border-t-4 border-r-4 border-orange-400 rounded-tr-sm" />
-                <div className="absolute bottom-0 left-0 w-4 h-4 border-b-4 border-l-4 border-orange-400 rounded-bl-sm" />
-                <div className="absolute bottom-0 right-0 w-4 h-4 border-b-4 border-r-4 border-orange-400 rounded-br-sm" />
+                <div className="absolute top-0 left-0 w-5 h-5 border-t-4 border-l-4 border-orange-400 rounded-tl-sm" />
+                <div className="absolute top-0 right-0 w-5 h-5 border-t-4 border-r-4 border-orange-400 rounded-tr-sm" />
+                <div className="absolute bottom-0 left-0 w-5 h-5 border-b-4 border-l-4 border-orange-400 rounded-bl-sm" />
+                <div className="absolute bottom-0 right-0 w-5 h-5 border-b-4 border-r-4 border-orange-400 rounded-br-sm" />
+
+                {/* 3cm Distance Guide Reticle */}
+                {isMacroMode3cm && (
+                  <div className="absolute inset-2 border border-dashed border-orange-300/40 rounded-xl flex items-center justify-center">
+                    <span className="text-[10px] font-mono text-orange-200 bg-black/60 px-2 py-0.5 rounded-full backdrop-blur-sm">
+                      Distância ideal: ~3cm do código
+                    </span>
+                  </div>
+                )}
 
                 {/* Animated Scanning Laser Line */}
                 <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-red-500 to-transparent shadow-[0_0_12px_#ef4444] animate-pulse top-1/2 -translate-y-1/2" />
               </div>
-              <div className="absolute bottom-3 text-center px-4 py-1 rounded-full bg-black/60 backdrop-blur-md border border-white/10 text-[11px] text-white font-medium">
-                Alinhe o código de barras no retângulo central
+
+              <div className="mt-3 text-center px-3.5 py-1 rounded-full bg-black/75 backdrop-blur-md border border-white/10 text-[11px] text-white font-medium flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                <span>Aproxime a câmera a 3cm do código de barras • Apita automaticamente</span>
               </div>
             </div>
           )}

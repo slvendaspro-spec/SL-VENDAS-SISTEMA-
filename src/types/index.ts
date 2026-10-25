@@ -64,6 +64,8 @@ export interface Product {
   unit: string; // Unid, Kg, Caixa, Serviço
   imageUrl?: string;
   barcode?: string;
+  isVisibleInCashier?: boolean; // Habilitar produto para estar visível no caixa
+  visibleInStores?: Record<string, boolean>; // Habilitação específica por loja
   createdAt: string;
 }
 

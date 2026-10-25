@@ -36,6 +36,10 @@ import {
   Smartphone,
   Lock,
   Settings,
+  Clock,
+  Flame,
+  Archive,
+  Folder,
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { Product, Store, User, PaymentMethod, Expense, AuthorizedDevice, Sale } from '../../types';
@@ -45,6 +49,9 @@ import { UserManagementModal } from '../modals/UserManagementModal';
 import { ProductManagementModal } from '../modals/ProductManagementModal';
 import { DeviceManagementModal } from '../modals/DeviceManagementModal';
 import { SystemResetModal } from '../modals/SystemResetModal';
+import { StoreProductsModal } from '../modals/StoreProductsModal';
+import { ProductDestructionModal } from '../modals/ProductDestructionModal';
+import { SavedReportsFolder } from './SavedReportsFolder';
 import { CASHIER_MODELS_LIST } from '../../data/initialData';
 import { sound } from '../../services/soundService';
 
@@ -63,6 +70,8 @@ export const AdminDashboard: React.FC = () => {
     updateProduct,
     deleteProduct,
     adjustStock,
+    toggleProductCashierVisibility,
+    setProductStoreStock,
     sales,
     cancelSale,
     deleteSale,
@@ -127,10 +136,19 @@ export const AdminDashboard: React.FC = () => {
   const [targetEditStore, setTargetEditStore] = useState<Store | null>(null);
   const [targetInputVal, setTargetInputVal] = useState<string>('');
   const [storeClosuresModal, setStoreClosuresModal] = useState<Store | null>(null);
+  const [storeForProductsModal, setStoreForProductsModal] = useState<Store | null>(null);
+
+  // Product Destruction / Stock Write-off modal state
+  const [isDestructionModalOpen, setIsDestructionModalOpen] = useState(false);
+  const [destructionInitialProduct, setDestructionInitialProduct] = useState<Product | null>(null);
+  const [destructionInitialStoreId, setDestructionInitialStoreId] = useState<string | undefined>(undefined);
 
   const [isSyncingSupabase, setIsSyncingSupabase] = useState(false);
   const [supabaseSyncMessage, setSupabaseSyncMessage] = useState<string | null>(null);
   const [modelChangeSuccess, setModelChangeSuccess] = useState<string | null>(null);
+
+  // Reports sub-view state: 'folder_archive' (Pasta de Relatórios Guardados por Data) or 'dre_metrics' (DRE)
+  const [reportsSubView, setReportsSubView] = useState<'folder_archive' | 'dre_metrics'>('folder_archive');
 
   // Active Admin Tab (100% focused on Supermarket POS, strictly no AI / 3D)
   const [adminTab, setAdminTab] = useState<
@@ -140,6 +158,7 @@ export const AdminDashboard: React.FC = () => {
     | 'sales'
     | 'users'
     | 'devices'
+    | 'sessions'
     | 'notifications'
     | 'reports'
     | 'cashier_models'
@@ -269,8 +288,9 @@ export const AdminDashboard: React.FC = () => {
             { id: 'sales', label: `Vendas (${filteredSales.length})`, icon: ShoppingCart },
             { id: 'users', label: `Usuários (${users.length})`, icon: Users },
             { id: 'devices', label: `Dispositivos (${devices.length})`, icon: ShieldCheck },
+            { id: 'sessions', label: `Sessões / Turnos (${shiftClosures.length})`, icon: Clock },
             { id: 'notifications', label: `Alertas (${notifications.filter((n) => !n.isRead).length})`, icon: Bell },
-            { id: 'reports', label: 'Relatórios & Exportação', icon: BarChart3 },
+            { id: 'reports', label: '📁 Pasta de Relatórios', icon: Archive },
             { id: 'cashier_models', label: 'Modelos de Caixa', icon: Sliders },
           ].map((tab) => {
             const Icon = tab.icon;
@@ -732,31 +752,172 @@ export const AdminDashboard: React.FC = () => {
                         </span>
                       </div>
 
-                      {/* Daily Sales Target Widget */}
-                      <div className="mb-3 p-2.5 rounded-2xl bg-slate-950/80 border border-slate-800/80 space-y-1">
-                        <div className="flex justify-between text-[11px]">
-                          <span className="text-slate-400">Meta Diária:</span>
-                          <span className="font-mono font-bold text-white">
-                            {target.toLocaleString('pt-MZ')} MZN
-                          </span>
+                      {/* 5 Requisitos por Loja: +Gerente +Caixa +Produtos +Meta Diária +Fecho Diário */}
+                      <div className="space-y-2.5 my-3 p-3 rounded-2xl bg-slate-950 border border-slate-800/80">
+                        {/* 1. + Meta Diária */}
+                        <div>
+                          <div className="flex items-center justify-between text-xs mb-1">
+                            <span className="text-slate-400 font-semibold flex items-center gap-1">
+                              <DollarSign className="w-3.5 h-3.5 text-amber-400" />
+                              <span>Meta Diária:</span>
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono font-bold text-white">
+                                {target.toLocaleString('pt-MZ')} MZN
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setTargetEditStore(st);
+                                  setTargetInputVal(target.toString());
+                                }}
+                                className="px-1.5 py-0.5 rounded bg-blue-900/60 hover:bg-blue-800 text-[10px] text-blue-300 font-semibold border border-blue-700/40 cursor-pointer"
+                                title="Editar Meta Diária da Loja"
+                              >
+                                + Meta Diária
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex justify-between text-[11px] text-slate-400">
+                            <span>Faturado Hoje:</span>
+                            <span className="font-mono font-bold text-emerald-400">
+                              {storeRevenue.toFixed(0)} MZN ({progress}%)
+                            </span>
+                          </div>
+                          <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden mt-1.5">
+                            <div
+                              className={`h-full rounded-full transition-all ${
+                                progress >= 100 ? 'bg-emerald-400' : 'bg-blue-500'
+                              }`}
+                              style={{ width: `${progress}%` }}
+                            />
+                          </div>
                         </div>
-                        <div className="flex justify-between text-[11px]">
-                          <span className="text-slate-400">Faturado Hoje:</span>
-                          <span className="font-mono font-bold text-emerald-400">
-                            {storeRevenue.toFixed(0)} MZN
-                          </span>
-                        </div>
-                        <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden mt-1">
-                          <div
-                            className={`h-full rounded-full ${
-                              progress >= 100 ? 'bg-emerald-400' : 'bg-blue-500'
-                            }`}
-                            style={{ width: `${progress}%` }}
-                          />
+
+                        {/* Direct Action Badges: +Gerente, +Caixa, +Produtos, +Fecho Diário */}
+                        <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-900 text-xs">
+                          {/* 2. + Gerente */}
+                          {(() => {
+                            const storeManagers = users.filter(
+                              (u) =>
+                                (u.assignedStoreId === st.id || u.assignedStoreName === st.name) &&
+                                u.role === 'store_manager'
+                            );
+                            return (
+                              <div className="p-2 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[11px] text-slate-400">Gerentes:</span>
+                                  <span className="font-mono font-bold text-blue-400">
+                                    {storeManagers.length}
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setUserToEdit(null);
+                                    setPreselectedRoleForUser('store_manager');
+                                    setPreselectedStoreForUser(st.id);
+                                    setIsUserModalOpen(true);
+                                  }}
+                                  className="mt-1.5 py-1 px-2 rounded-lg bg-blue-600/30 hover:bg-blue-600 text-blue-300 hover:text-white text-[10px] font-bold border border-blue-500/40 flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                  <span>+ Gerente</span>
+                                </button>
+                              </div>
+                            );
+                          })()}
+
+                          {/* 3. + Caixa */}
+                          {(() => {
+                            const storeCashiers = users.filter(
+                              (u) =>
+                                (u.assignedStoreId === st.id || u.assignedStoreName === st.name) &&
+                                u.role === 'cashier'
+                            );
+                            return (
+                              <div className="p-2 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[11px] text-slate-400">Caixas:</span>
+                                  <span className="font-mono font-bold text-emerald-400">
+                                    {storeCashiers.length}
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setUserToEdit(null);
+                                    setPreselectedRoleForUser('cashier');
+                                    setPreselectedStoreForUser(st.id);
+                                    setIsUserModalOpen(true);
+                                  }}
+                                  className="mt-1.5 py-1 px-2 rounded-lg bg-emerald-600/30 hover:bg-emerald-600 text-emerald-300 hover:text-white text-[10px] font-bold border border-emerald-500/40 flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                  <span>+ Caixa</span>
+                                </button>
+                              </div>
+                            );
+                          })()}
+
+                          {/* 4. + Produtos (Estoque & Visibilidade no Caixa) */}
+                          {(() => {
+                            const storeProducts = products.filter(
+                              (p) => !p.stockByStore || (p.stockByStore[st.id] ?? 0) > 0
+                            );
+                            const visibleProducts = products.filter(
+                              (p) =>
+                                (p.visibleInStores && p.visibleInStores[st.id] !== undefined
+                                  ? p.visibleInStores[st.id]
+                                  : p.isVisibleInCashier !== false)
+                            );
+                            return (
+                              <div className="p-2 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[11px] text-slate-400">Produtos / Caixa:</span>
+                                  <span className="font-mono font-bold text-amber-400">
+                                    {visibleProducts.length}/{products.length}
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setStoreForProductsModal(st)}
+                                  className="mt-1.5 py-1 px-2 rounded-lg bg-amber-600/30 hover:bg-amber-600 text-amber-300 hover:text-white text-[10px] font-bold border border-amber-500/40 flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                                  title="Gerenciar produtos, estoque e habilitar no caixa desta loja"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                  <span>+ Produtos & Caixa</span>
+                                </button>
+                              </div>
+                            );
+                          })()}
+
+                          {/* 5. + Fecho Diário */}
+                          {(() => {
+                            const storeClosures = shiftClosures.filter((c) => c.storeId === st.id);
+                            return (
+                              <div className="p-2 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[11px] text-slate-400">Fechos:</span>
+                                  <span className="font-mono font-bold text-purple-400">
+                                    {storeClosures.length}
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setStoreClosuresModal(st)}
+                                  className="mt-1.5 py-1 px-2 rounded-lg bg-purple-600/30 hover:bg-purple-600 text-purple-300 hover:text-white text-[10px] font-bold border border-purple-500/40 flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                                >
+                                  <Check className="w-3 h-3" />
+                                  <span>+ Fecho Diário</span>
+                                </button>
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
 
-                      <div className="space-y-1.5 text-xs text-slate-300">
+                      <div className="space-y-1 text-xs text-slate-300">
                         <p>
                           <strong className="text-slate-400">Cidade:</strong> {st.city}
                         </p>
@@ -816,16 +977,32 @@ export const AdminDashboard: React.FC = () => {
                   Preços em Meticais (MZN), estoque por filial, custo vs venda e margem de lucro
                 </p>
               </div>
-              <button
-                onClick={() => {
-                  setProductToEdit(null);
-                  setIsProductManagementModalOpen(true);
-                }}
-                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-blue-950/50 transition-all cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-                <span>+ Novo Produto Catalogado</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDestructionInitialProduct(null);
+                    setDestructionInitialStoreId(undefined);
+                    setIsDestructionModalOpen(true);
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-red-950/80 hover:bg-red-900 text-red-300 hover:text-white border border-red-500/40 text-xs font-bold flex items-center justify-center gap-1.5 shadow-lg shadow-red-950/40 transition-all cursor-pointer"
+                  title="Baixa de estoque por destruição, avaria, quebra ou validade"
+                >
+                  <Flame className="w-4 h-4 text-red-400" />
+                  <span>Baixa / Destruição</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setProductToEdit(null);
+                    setIsProductManagementModalOpen(true);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-blue-950/50 transition-all cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>+ Novo Produto Catalogado</span>
+                </button>
+              </div>
             </div>
 
             {/* Products Table */}
@@ -841,6 +1018,7 @@ export const AdminDashboard: React.FC = () => {
                     <th className="pb-3 font-semibold text-right">P. Venda</th>
                     <th className="pb-3 font-semibold text-right">Margem</th>
                     <th className="pb-3 font-semibold text-center">Estoque Total</th>
+                    <th className="pb-3 font-semibold text-center">No Caixa</th>
                     <th className="pb-3 font-semibold text-right">Ações</th>
                   </tr>
                 </thead>
@@ -882,6 +1060,20 @@ export const AdminDashboard: React.FC = () => {
                             {p.stockQuantity} {p.unit}
                           </span>
                         </td>
+                        <td className="py-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => toggleProductCashierVisibility(p.id)}
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold border transition-all cursor-pointer ${
+                              p.isVisibleInCashier !== false
+                                ? 'bg-emerald-950 text-emerald-300 border-emerald-500/40 hover:bg-emerald-900/60'
+                                : 'bg-red-950 text-red-400 border-red-500/40 hover:bg-red-900/60'
+                            }`}
+                            title="Clique para alternar se este produto aparece no Caixa (PDV)"
+                          >
+                            {p.isVisibleInCashier !== false ? '🟢 Visível' : '🔴 Oculto'}
+                          </button>
+                        </td>
                         <td className="py-3 text-right">
                           <div className="flex items-center justify-end gap-1.5">
                             <button
@@ -908,6 +1100,18 @@ export const AdminDashboard: React.FC = () => {
                               title="Ajustar / Dar Entrada no Estoque"
                             >
                               Entrada
+                            </button>
+                            <button
+                              onClick={() => {
+                                setDestructionInitialProduct(p);
+                                setDestructionInitialStoreId(stores[0]?.id);
+                                setIsDestructionModalOpen(true);
+                              }}
+                              className="px-2 py-1 rounded-lg bg-red-950/60 hover:bg-red-900 text-red-400 text-[11px] font-medium flex items-center gap-1 border border-red-500/30"
+                              title="Dar Baixa por Destruição / Avaria / Validade"
+                            >
+                              <Flame className="w-3 h-3" />
+                              <span>Baixa</span>
                             </button>
                             <button
                               onClick={() => {
@@ -940,23 +1144,55 @@ export const AdminDashboard: React.FC = () => {
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const res = deleteTodaySalesOneByOne();
+                    setSalesDeleteActionNotice(res.message);
+                    setTimeout(() => setSalesDeleteActionNotice(null), 6000);
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-red-950/80 hover:bg-red-900 border border-red-500/50 text-red-200 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-lg shadow-red-950/40"
+                  title="Eliminar todas as vendas registradas hoje uma a uma do sistema"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                  <span>Eliminar Vendas do Dia (Uma a Uma)</span>
+                </button>
                 <button
                   onClick={() => setShowExpenseModal(true)}
-                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 flex items-center gap-1.5"
+                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 flex items-center gap-1.5"
                 >
                   <Plus className="w-3.5 h-3.5 text-emerald-400" />
                   <span>Registrar Despesa</span>
                 </button>
                 <button
+                  onClick={() => {
+                    setAdminTab('reports');
+                    setReportsSubView('folder_archive');
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-blue-950/80 hover:bg-blue-900 border border-blue-500/40 text-blue-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-md"
+                  title="Abrir pasta de relatórios e histórico de vendas por data"
+                >
+                  <Folder className="w-3.5 h-3.5 text-blue-400" />
+                  <span>📁 Pastas por Data</span>
+                </button>
+                <button
                   onClick={handleExportCSV}
-                  className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                  className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                 >
                   <FileSpreadsheet className="w-3.5 h-3.5" />
                   <span>Exportar CSV</span>
                 </button>
               </div>
             </div>
+
+            {/* Notice Banner for Vendas do dia eliminadas */}
+            {salesDeleteActionNotice && (
+              <div className="p-3.5 rounded-2xl bg-amber-950/80 border border-amber-500/50 text-amber-200 text-xs flex items-center gap-2 animate-in fade-in">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>{salesDeleteActionNotice}</span>
+              </div>
+            )}
 
             <div className="bg-slate-900 rounded-3xl border border-slate-800 p-5 shadow-xl overflow-x-auto">
               <table className="w-full text-left text-xs">
@@ -1008,17 +1244,27 @@ export const AdminDashboard: React.FC = () => {
                         </span>
                       </td>
                       <td className="py-3 text-right">
-                        {s.status === 'COMPLETED' && (
+                        <div className="flex items-center justify-end gap-1.5">
+                          {s.status === 'COMPLETED' && (
+                            <button
+                              onClick={() => {
+                                setCancelModalSale(s.id);
+                                setCancelReason('');
+                              }}
+                              className="px-2 py-1 rounded-lg border border-red-500/40 text-red-400 hover:bg-red-950/40 text-[11px]"
+                            >
+                              Estornar
+                            </button>
+                          )}
                           <button
-                            onClick={() => {
-                              setCancelModalSale(s.id);
-                              setCancelReason('');
-                            }}
-                            className="px-2 py-1 rounded-lg border border-red-500/40 text-red-400 hover:bg-red-950/40 text-[11px]"
+                            type="button"
+                            onClick={() => setDeleteConfirmSale(s)}
+                            className="p-1 rounded-lg hover:bg-red-950/60 text-slate-500 hover:text-red-400 transition-colors"
+                            title="Eliminar Venda Permanentemente (Restaura Estoque)"
                           >
-                            Estornar
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
-                        )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1243,13 +1489,25 @@ export const AdminDashboard: React.FC = () => {
         {/* ===================== TAB 6: DISPOSITIVOS AUTORIZADOS ===================== */}
         {adminTab === 'devices' && (
           <div className="space-y-5">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-bold text-white">Controle de Dispositivos Conectados</h2>
                 <p className="text-xs text-slate-400">
-                  Gerencie smartphones, tablets e computadores autorizados a operar os PDVs
+                  Gerencie smartphones, tablets e computadores autorizados a operar os PDVs (Adicionar, editar e eliminar permanente)
                 </p>
               </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setDeviceToEdit(null);
+                  setIsDeviceModalOpen(true);
+                }}
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-blue-950/50 transition-all cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>+ Novo Dispositivo</span>
+              </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1277,6 +1535,14 @@ export const AdminDashboard: React.FC = () => {
 
                     <div className="space-y-1 text-xs text-slate-300">
                       <p>
+                        <strong className="text-slate-400">Tipo:</strong>{' '}
+                        {dev.deviceType === 'mobile'
+                          ? 'Smartphone / Telemóvel'
+                          : dev.deviceType === 'tablet'
+                          ? 'Tablet'
+                          : 'Computador Desktop'}
+                      </p>
+                      <p>
                         <strong className="text-slate-400">IP:</strong> {dev.ipAddress}
                       </p>
                       <p>
@@ -1286,13 +1552,13 @@ export const AdminDashboard: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="mt-4 pt-3 border-t border-slate-800">
+                  <div className="mt-4 pt-3 border-t border-slate-800 space-y-2">
                     {dev.status === 'AUTHORIZED' ? (
                       <button
                         onClick={() => revokeDevice(dev.id)}
-                        className="w-full py-1.5 rounded-xl border border-red-500/40 text-red-400 hover:bg-red-950/40 text-xs font-semibold transition-colors"
+                        className="w-full py-1.5 rounded-xl border border-amber-500/40 text-amber-300 hover:bg-amber-950/40 text-xs font-semibold transition-colors"
                       >
-                        Revogar Acesso Imediatamente
+                        Suspender / Revogar Acesso
                       </button>
                     ) : (
                       <button
@@ -1302,6 +1568,29 @@ export const AdminDashboard: React.FC = () => {
                         Autorizar Novamente
                       </button>
                     )}
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeviceToEdit(dev);
+                          setIsDeviceModalOpen(true);
+                        }}
+                        className="flex-1 py-1.5 rounded-xl bg-blue-900/60 hover:bg-blue-800 text-blue-200 text-xs font-semibold border border-blue-700/50 flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                      >
+                        <Edit className="w-3 h-3" />
+                        <span>Editar</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteConfirmDevice(dev)}
+                        className="px-3 py-1.5 rounded-xl bg-red-950/70 hover:bg-red-900 text-red-300 text-xs font-semibold border border-red-800/50 flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                        title="Eliminar Dispositivo Permanentemente"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Eliminar</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -1418,73 +1707,104 @@ export const AdminDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* ===================== TAB 8: RELATÓRIOS & EXPORTAÇÃO ===================== */}
+        {/* ===================== TAB 8: RELATÓRIOS & PASTAS DE VENDAS GUARDADAS ===================== */}
         {adminTab === 'reports' && (
           <div className="space-y-5">
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-bold text-white">Relatórios Executivos & Exportação</h2>
-                <p className="text-xs text-slate-400">
-                  Demonstrativos de resultados, despesas operacionais e exportação para Excel (CSV)
-                </p>
+            {/* Sub-Navigation between Saved Reports Folder and Financial DRE */}
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900 p-2 rounded-2xl border border-slate-800 text-xs">
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setReportsSubView('folder_archive')}
+                  className={`px-3.5 py-2 rounded-xl font-bold flex items-center gap-2 transition-all cursor-pointer ${
+                    reportsSubView === 'folder_archive'
+                      ? 'bg-blue-600 text-white shadow-md shadow-blue-950/50'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                  }`}
+                >
+                  <Archive className="w-4 h-4 text-amber-400" />
+                  <span>Pasta de Relatórios & Vendas por Data</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setReportsSubView('dre_metrics')}
+                  className={`px-3.5 py-2 rounded-xl font-bold flex items-center gap-2 transition-all cursor-pointer ${
+                    reportsSubView === 'dre_metrics'
+                      ? 'bg-emerald-600 text-white shadow-md shadow-emerald-950/50'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                  }`}
+                >
+                  <BarChart3 className="w-4 h-4 text-emerald-400" />
+                  <span>Demonstrativo DRE & Balanço Contábil</span>
+                </button>
               </div>
 
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleExportCSV}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer"
-                >
-                  <FileSpreadsheet className="w-4 h-4" />
-                  <span>Baixar Planilha Excel (CSV)</span>
-                </button>
-                <button
-                  onClick={() => window.print()}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer"
-                >
-                  <Printer className="w-4 h-4" />
-                  <span>Imprimir Relatório</span>
-                </button>
-              </div>
+              {reportsSubView === 'dre_metrics' && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleExportCSV}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5" />
+                    <span>Baixar CSV</span>
+                  </button>
+                  <button
+                    onClick={() => window.print()}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Imprimir DRE</span>
+                  </button>
+                </div>
+              )}
             </div>
 
-            {/* DRE Simplificado */}
-            <div className="bg-slate-900 rounded-3xl border border-slate-800 p-6 shadow-xl max-w-2xl mx-auto space-y-4">
-              <div className="text-center pb-4 border-b border-slate-800">
-                <h3 className="text-base font-bold text-white uppercase tracking-wider">
-                  SL VENDAS — DEMONSTRATIVO DE RESULTADOS (DRE)
-                </h3>
-                <p className="text-xs text-slate-400">
-                  Moeda Oficial: Metical Moçambicano (MZN) • Fuso: África/Maputo
-                </p>
+            {/* View 1: Saved Reports Folder (Pastas de Vendas por Data & Arquivo Permanente) */}
+            {reportsSubView === 'folder_archive' && <SavedReportsFolder />}
+
+            {/* View 2: Financial DRE */}
+            {reportsSubView === 'dre_metrics' && (
+              <div className="space-y-4">
+                <div className="bg-slate-900 rounded-3xl border border-slate-800 p-6 shadow-xl max-w-2xl mx-auto space-y-4">
+                  <div className="text-center pb-4 border-b border-slate-800">
+                    <h3 className="text-base font-bold text-white uppercase tracking-wider">
+                      SL VENDAS — DEMONSTRATIVO DE RESULTADOS (DRE)
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Moeda Oficial: Metical Moçambicano (MZN) • Fuso: África/Maputo
+                    </p>
+                  </div>
+
+                  <div className="space-y-2 text-xs font-mono">
+                    <div className="flex justify-between py-1 border-b border-slate-800/80">
+                      <span className="text-slate-300">(+) RECEITA BRUTA DE VENDAS</span>
+                      <span className="font-bold text-white">{totalRevenue.toFixed(2)} MZN</span>
+                    </div>
+
+                    <div className="flex justify-between py-1 border-b border-slate-800/80 text-red-300">
+                      <span>(-) CUSTO DAS MERCADORIAS VENDIDAS (CPV)</span>
+                      <span>-{totalCost.toFixed(2)} MZN</span>
+                    </div>
+
+                    <div className="flex justify-between py-1.5 border-b border-slate-700 font-bold text-emerald-400">
+                      <span>(=) LUCRO BRUTO OPERACIONAL</span>
+                      <span>{grossProfit.toFixed(2)} MZN</span>
+                    </div>
+
+                    <div className="flex justify-between py-1 border-b border-slate-800/80 text-amber-300">
+                      <span>(-) DESPESAS OPERACIONAIS FIXAS</span>
+                      <span>-{totalExpenses.toFixed(2)} MZN</span>
+                    </div>
+
+                    <div className="flex justify-between py-2 text-base font-bold text-emerald-400 border-t-2 border-emerald-500/60 pt-2">
+                      <span>(=) LUCRO LÍQUIDO DO PERÍODO</span>
+                      <span>{netProfit.toFixed(2)} MZN</span>
+                    </div>
+                  </div>
+                </div>
               </div>
-
-              <div className="space-y-2 text-xs font-mono">
-                <div className="flex justify-between py-1 border-b border-slate-800/80">
-                  <span className="text-slate-300">(+) RECEITA BRUTA DE VENDAS</span>
-                  <span className="font-bold text-white">{totalRevenue.toFixed(2)} MZN</span>
-                </div>
-
-                <div className="flex justify-between py-1 border-b border-slate-800/80 text-red-300">
-                  <span>(-) CUSTO DAS MERCADORIAS VENDIDAS (CPV)</span>
-                  <span>-{totalCost.toFixed(2)} MZN</span>
-                </div>
-
-                <div className="flex justify-between py-1.5 border-b border-slate-700 font-bold text-emerald-400">
-                  <span>(=) LUCRO BRUTO OPERACIONAL</span>
-                  <span>{grossProfit.toFixed(2)} MZN</span>
-                </div>
-
-                <div className="flex justify-between py-1 border-b border-slate-800/80 text-amber-300">
-                  <span>(-) DESPESAS OPERACIONAIS FIXAS</span>
-                  <span>-{totalExpenses.toFixed(2)} MZN</span>
-                </div>
-
-                <div className="flex justify-between py-2 text-base font-bold text-emerald-400 border-t-2 border-emerald-500/60 pt-2">
-                  <span>(=) LUCRO LÍQUIDO DO PERÍODO</span>
-                  <span>{netProfit.toFixed(2)} MZN</span>
-                </div>
-              </div>
-            </div>
+            )}
           </div>
         )}
 
@@ -1527,7 +1847,7 @@ export const AdminDashboard: React.FC = () => {
             <div className="p-4 rounded-3xl bg-gradient-to-r from-slate-900 to-slate-900/90 border border-orange-500/40 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 rounded-2xl bg-orange-500/20 border border-orange-500/40 flex items-center justify-center text-orange-400">
-                  <Lock className="w-6 h-6" />
+                  <Sliders className="w-6 h-6" />
                 </div>
                 <div>
                   <p className="text-xs font-semibold text-orange-300 uppercase tracking-wider">
@@ -1537,7 +1857,7 @@ export const AdminDashboard: React.FC = () => {
                     {CASHIER_MODELS_LIST.find((m) => m.id === cashierModel)?.name || 'Modelo Ed Supermercado'}
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Atribuído pelo Administrador Geral • Bloqueado para alteração por operadores de caixa
+                    Livre escolha para caixas e administradores • Adaptação ergonômica a qualquer tipo de tela
                   </p>
                 </div>
               </div>
@@ -1733,124 +2053,126 @@ export const AdminDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* ===================== TAB 9: ASSISTENTE DE IA (GEMINI 3.8 FLASH) ===================== */}
-        {adminTab === 'ai_assistant' && (
-          <div className="bg-slate-900 rounded-3xl border border-emerald-500/30 p-5 shadow-2xl flex flex-col h-[640px]">
-            {/* Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center text-white shadow-lg shadow-emerald-950/60">
-                  <Sparkles className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-base text-white">SL Inteligência Comercial (Gemini 3.8 Flash)</h3>
-                  <p className="text-xs text-emerald-400">
-                    Análise em tempo real de estoques, tendências de vendas e lucratividade multi-loja
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Messages Chat Area */}
-            <div className="flex-1 overflow-y-auto space-y-4 pr-2 mb-4">
-              {aiMessages.map((msg, idx) => (
-                <div
-                  key={idx}
-                  className={`flex gap-3 text-xs ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                >
-                  {msg.role === 'assistant' && (
-                    <div className="w-7 h-7 rounded-lg bg-emerald-600 flex items-center justify-center text-white shrink-0 mt-0.5">
-                      <Sparkles className="w-3.5 h-3.5" />
-                    </div>
-                  )}
-
-                  <div
-                    className={`max-w-[85%] rounded-2xl p-4 leading-relaxed ${
-                      msg.role === 'user'
-                        ? 'bg-emerald-600 text-white rounded-br-none shadow-md'
-                        : 'bg-slate-950 border border-slate-800 text-slate-200 rounded-bl-none shadow-md whitespace-pre-wrap'
-                    }`}
-                  >
-                    <p>{msg.text}</p>
-                    <span className="block mt-1 text-[10px] text-slate-400 font-mono text-right">{msg.time}</span>
-                  </div>
-                </div>
-              ))}
-
-              {aiLoading && (
-                <div className="flex items-center gap-2 p-3 text-xs text-emerald-400 bg-slate-950 rounded-2xl border border-slate-800 w-fit">
-                  <RefreshCw className="w-4 h-4 animate-spin text-emerald-500" />
-                  <span>SL Inteligência analisando dados do sistema...</span>
-                </div>
-              )}
-            </div>
-
-            {/* Quick Prompt Pills */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-2 scrollbar-none text-[11px]">
-              <button
-                onClick={() => handleAskAI('Identifique produtos que estão prestes a esgotar e sugira quantidade de reposição.')}
-                className="px-3 py-1 rounded-xl bg-slate-950 border border-slate-800 hover:border-emerald-500/40 text-slate-300 whitespace-nowrap transition-colors"
-              >
-                🚨 Previsão de Estoque Baixo
-              </button>
-              <button
-                onClick={() => handleAskAI('Quais vendedores tiveram o melhor desempenho em vendas hoje?')}
-                className="px-3 py-1 rounded-xl bg-slate-950 border border-slate-800 hover:border-emerald-500/40 text-slate-300 whitespace-nowrap transition-colors"
-              >
-                🏆 Desempenho dos Vendedores
-              </button>
-              <button
-                onClick={() => handleAskAI('Faça um resumo financeiro das despesas versus lucros.')}
-                className="px-3 py-1 rounded-xl bg-slate-950 border border-slate-800 hover:border-emerald-500/40 text-slate-300 whitespace-nowrap transition-colors"
-              >
-                💰 Resumo Financeiro & Margens
-              </button>
-            </div>
-
-            {/* Input Bar */}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleAskAI();
-              }}
-              className="flex items-center gap-2 pt-2 border-t border-slate-800"
-            >
-              <input
-                type="text"
-                value={aiPrompt}
-                onChange={(e) => setAiPrompt(e.target.value)}
-                placeholder="Pergunte sobre lucros, estoque, lojas ou vendedores..."
-                className="flex-1 px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 focus:border-emerald-500 text-xs text-white placeholder-slate-500 outline-none"
-              />
-              <button
-                type="submit"
-                disabled={!aiPrompt.trim() || aiLoading}
-                className="py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <span>Enviar</span>
-                <Send className="w-3.5 h-3.5" />
-              </button>
-            </form>
-          </div>
-        )}
-
-        {/* ===================== TAB 10: TERMINAL 3D (THREE.JS) ===================== */}
-        {adminTab === 'hub3d' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
+        {/* ===================== TAB: SESSÕES & TURNOS (INÍCIO E TÉRMINO DE SESSÃO) ===================== */}
+        {adminTab === 'sessions' && (
+          <div className="space-y-5">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
               <div>
-                <h2 className="text-lg font-bold text-white">Hub Visual 3D da Rede SL VENDAS</h2>
+                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-purple-400" />
+                  <span>Início e Término de Sessão de Caixa (Turnos Operacionais)</span>
+                </h2>
                 <p className="text-xs text-slate-400">
-                  Modelo 3D procedural do terminal PDV inteligente e satélites de lojas em tempo real
+                  Auditoria de início e término de sessão para cada loja e caixa com conferência de fundo inicial, vendas e quebra de caixa
                 </p>
               </div>
+
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1.5 rounded-xl bg-purple-950/80 border border-purple-500/40 text-purple-200 text-xs font-mono font-bold">
+                  {shiftClosures.length} Fechos Registrados
+                </span>
+              </div>
             </div>
 
-            <Store3DHub
-              stores={stores}
-              activeStoreId={selectedAdminStoreId}
-              totalSalesTodayMZN={totalRevenue}
-            />
+            {/* Quick Metrics Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="p-4 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl">
+                <span className="text-xs text-slate-400 block mb-1">Total de Turnos Registrados</span>
+                <span className="font-mono font-bold text-2xl text-white">{shiftClosures.length}</span>
+              </div>
+              <div className="p-4 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl">
+                <span className="text-xs text-slate-400 block mb-1">Faturamento em Turnos</span>
+                <span className="font-mono font-bold text-2xl text-emerald-400">
+                  {shiftClosures.reduce((acc, c) => acc + c.totalSalesGross, 0).toFixed(2)} MZN
+                </span>
+              </div>
+              <div className="p-4 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl">
+                <span className="text-xs text-slate-400 block mb-1">Fundos de Troco Iniciais</span>
+                <span className="font-mono font-bold text-2xl text-blue-400">
+                  {shiftClosures.reduce((acc, c) => acc + c.initialCash, 0).toFixed(2)} MZN
+                </span>
+              </div>
+              <div className="p-4 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl">
+                <span className="text-xs text-slate-400 block mb-1">Divergência / Quebra Total</span>
+                <span
+                  className={`font-mono font-bold text-2xl ${
+                    shiftClosures.reduce((acc, c) => acc + c.difference, 0) < 0
+                      ? 'text-red-400'
+                      : 'text-emerald-400'
+                  }`}
+                >
+                  {shiftClosures.reduce((acc, c) => acc + c.difference, 0).toFixed(2)} MZN
+                </span>
+              </div>
+            </div>
+
+            {/* Shift Closures Table */}
+            <div className="bg-slate-900 rounded-3xl border border-slate-800 p-5 shadow-xl overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-400 font-mono">
+                    <th className="pb-3 font-semibold">Nº Fecho</th>
+                    <th className="pb-3 font-semibold">Loja</th>
+                    <th className="pb-3 font-semibold">Operador de Caixa</th>
+                    <th className="pb-3 font-semibold">Início de Sessão</th>
+                    <th className="pb-3 font-semibold">Término de Sessão</th>
+                    <th className="pb-3 font-semibold text-right">Fundo Inicial</th>
+                    <th className="pb-3 font-semibold text-right">Faturado Turno</th>
+                    <th className="pb-3 font-semibold text-right">Gaveta Real</th>
+                    <th className="pb-3 font-semibold text-right">Diferença</th>
+                    <th className="pb-3 font-semibold text-center">Estado</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 font-mono">
+                  {shiftClosures.length === 0 ? (
+                    <tr>
+                      <td colSpan={10} className="py-8 text-center text-slate-500 font-sans">
+                        Nenhuma sessão ou fecho registrado ainda. As sessões abertas e fechadas pelos caixas aparecerão aqui.
+                      </td>
+                    </tr>
+                  ) : (
+                    shiftClosures.map((c) => (
+                      <tr key={c.id} className="hover:bg-slate-800/40 transition-colors">
+                        <td className="py-3 font-bold text-purple-400">{c.closureNumber}</td>
+                        <td className="py-3 text-slate-200 font-sans">{c.storeName}</td>
+                        <td className="py-3 text-white font-sans">{c.cashierName}</td>
+                        <td className="py-3 text-slate-400">
+                          {new Date(c.openedAt).toLocaleTimeString('pt-MZ', { hour: '2-digit', minute: '2-digit' })}{' '}
+                          <span className="text-[10px] text-slate-500">({new Date(c.openedAt).toLocaleDateString('pt-MZ')})</span>
+                        </td>
+                        <td className="py-3 text-slate-400">
+                          {new Date(c.closedAt).toLocaleTimeString('pt-MZ', { hour: '2-digit', minute: '2-digit' })}{' '}
+                          <span className="text-[10px] text-slate-500">({new Date(c.closedAt).toLocaleDateString('pt-MZ')})</span>
+                        </td>
+                        <td className="py-3 text-slate-300 text-right">{c.initialCash.toFixed(2)} MZN</td>
+                        <td className="py-3 font-bold text-emerald-400 text-right">
+                          {c.totalSalesGross.toFixed(2)} MZN
+                        </td>
+                        <td className="py-3 font-bold text-white text-right">
+                          {c.actualCashInDrawer.toFixed(2)} MZN
+                        </td>
+                        <td
+                          className={`py-3 font-bold text-right ${
+                            c.difference < 0
+                              ? 'text-red-400'
+                              : c.difference > 0
+                              ? 'text-amber-400'
+                              : 'text-emerald-400'
+                          }`}
+                        >
+                          {c.difference === 0 ? 'Exato' : `${c.difference > 0 ? '+' : ''}${c.difference.toFixed(2)} MZN`}
+                        </td>
+                        <td className="py-3 text-center font-sans">
+                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold">
+                            Fechada & Sincronizada
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>
@@ -2324,6 +2646,267 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </div>
       )}
+      {/* Device Management Modal (Adicionar & Editar Manualmente Dispositivo) */}
+      <DeviceManagementModal
+        isOpen={isDeviceModalOpen}
+        onClose={() => {
+          setIsDeviceModalOpen(false);
+          setDeviceToEdit(null);
+        }}
+        deviceToEdit={deviceToEdit}
+      />
+
+      {/* System Reset Modal (⚙️ Limpeza & Restauração com Código do Servidor) */}
+      <SystemResetModal
+        isOpen={isSystemResetModalOpen}
+        onClose={() => setIsSystemResetModalOpen(false)}
+      />
+
+      {/* Modal: Confirmação de Eliminação Permanente de Dispositivo */}
+      {deleteConfirmDevice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-sm bg-slate-900 border border-red-500/50 rounded-3xl p-6 shadow-2xl text-xs space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-red-500/20 text-red-400 flex items-center justify-center">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Eliminar Dispositivo</h3>
+                <p className="text-slate-400">Esta ação é irreversível</p>
+              </div>
+            </div>
+
+            <p className="text-slate-300 leading-relaxed">
+              Tem certeza de que deseja eliminar permanentemente o dispositivo{' '}
+              <strong className="text-white font-bold">{deleteConfirmDevice.deviceName}</strong> (
+              {deleteConfirmDevice.ipAddress} - {deleteConfirmDevice.assignedStoreName}) do sistema?
+            </p>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmDevice(null)}
+                className="px-4 py-2 rounded-xl text-slate-400 hover:text-white transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  deleteDevice(deleteConfirmDevice.id);
+                  setDeleteConfirmDevice(null);
+                }}
+                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold transition-all shadow-lg shadow-red-950/50"
+              >
+                Sim, Eliminar Permanente
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirmação de Eliminação Permanente de Venda */}
+      {deleteConfirmSale && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-sm bg-slate-900 border border-red-500/50 rounded-3xl p-6 shadow-2xl text-xs space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-red-500/20 text-red-400 flex items-center justify-center">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Eliminar Venda</h3>
+                <p className="text-slate-400">Restauração automática do estoque</p>
+              </div>
+            </div>
+
+            <p className="text-slate-300 leading-relaxed">
+              Deseja eliminar permanentemente a venda nº{' '}
+              <strong className="text-emerald-400 font-mono font-bold">{deleteConfirmSale.saleNumber}</strong> no valor de{' '}
+              <strong className="text-white font-bold">{deleteConfirmSale.total.toFixed(2)} MZN</strong>?
+              O estoque dos itens vendidos será retornado ao inventário da loja {deleteConfirmSale.storeName}.
+            </p>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmSale(null)}
+                className="px-4 py-2 rounded-xl text-slate-400 hover:text-white transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  deleteSale(deleteConfirmSale.id);
+                  setDeleteConfirmSale(null);
+                }}
+                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold transition-all shadow-lg shadow-red-950/50"
+              >
+                Sim, Eliminar Venda
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Editar Meta Diária da Loja (+ Meta Diária) */}
+      {targetEditStore && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-sm bg-slate-900 border border-blue-500/40 rounded-3xl p-6 shadow-2xl text-xs space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-blue-500/20 text-blue-400 flex items-center justify-center">
+                <DollarSign className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Meta Diária de Vendas</h3>
+                <p className="text-slate-400">{targetEditStore.name}</p>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-slate-300 mb-1.5 font-semibold">Valor da Meta Diária (MZN):</label>
+              <input
+                type="number"
+                min="0"
+                step="500"
+                value={targetInputVal}
+                onChange={(e) => setTargetInputVal(e.target.value)}
+                placeholder="Ex: 50000"
+                className="w-full p-3 rounded-xl bg-slate-950 border border-slate-700 text-white font-mono font-bold text-base outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setTargetEditStore(null)}
+                className="px-4 py-2 rounded-xl text-slate-400 hover:text-white transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const val = parseFloat(targetInputVal) || 0;
+                  if (val >= 0) {
+                    updateStore(targetEditStore.id, { dailySalesTarget: val });
+                    setTargetEditStore(null);
+                  }
+                }}
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold transition-all shadow-lg shadow-blue-950/50"
+              >
+                Salvar Meta Diária
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Histórico de Fechos Diários da Loja (+ Fecho Diário) */}
+      {storeClosuresModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-2xl bg-slate-900 border border-purple-500/40 rounded-3xl p-6 shadow-2xl text-xs space-y-4 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-purple-500/20 text-purple-400 flex items-center justify-center">
+                  <Clock className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Fechos Diários de Caixa</h3>
+                  <p className="text-slate-400">{storeClosuresModal.name} • {storeClosuresModal.city}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setStoreClosuresModal(null)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 space-y-2.5 pr-1">
+              {(() => {
+                const storeClosures = shiftClosures.filter((c) => c.storeId === storeClosuresModal.id);
+                if (storeClosures.length === 0) {
+                  return (
+                    <div className="py-10 text-center text-slate-500">
+                      Nenhum fecho diário registrado ainda para esta loja.
+                    </div>
+                  );
+                }
+                return storeClosures.map((c) => (
+                  <div
+                    key={c.id}
+                    className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-purple-400">{c.closureNumber}</span>
+                        <span className="text-white font-semibold">{c.cashierName}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Fechado: {new Date(c.closedAt).toLocaleString('pt-MZ')} • {c.salesCount} vendas
+                      </p>
+                    </div>
+
+                    <div className="text-right sm:text-right font-mono">
+                      <span className="text-[10px] text-slate-400 block">Total Faturado:</span>
+                      <span className="font-bold text-emerald-400 text-sm">
+                        {c.totalSalesGross.toFixed(2)} MZN
+                      </span>
+                      <span className="text-[10px] text-slate-500 block">
+                        Fundo: {c.initialCash.toFixed(2)} | Gaveta: {c.actualCashInDrawer.toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                ));
+              })()}
+            </div>
+
+            <div className="flex justify-end pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setStoreClosuresModal(null)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold transition-colors"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Store Products & Cashier Visibility Modal */}
+      <StoreProductsModal
+        isOpen={!!storeForProductsModal}
+        onClose={() => setStoreForProductsModal(null)}
+        store={storeForProductsModal}
+        onAddNewProduct={() => {
+          setProductToEdit(null);
+          setIsProductManagementModalOpen(true);
+        }}
+        onEditProduct={(p) => {
+          setProductToEdit(p);
+          setIsProductManagementModalOpen(true);
+        }}
+        onOpenDestruction={(prod, stId) => {
+          setDestructionInitialProduct(prod);
+          setDestructionInitialStoreId(stId);
+          setIsDestructionModalOpen(true);
+        }}
+      />
+
+      {/* Product Destruction & Stock Distribution Modal */}
+      <ProductDestructionModal
+        isOpen={isDestructionModalOpen}
+        onClose={() => {
+          setIsDestructionModalOpen(false);
+          setDestructionInitialProduct(null);
+          setDestructionInitialStoreId(undefined);
+        }}
+        initialProductId={destructionInitialProduct?.id}
+        initialStoreId={destructionInitialStoreId}
+      />
     </div>
   );
 };

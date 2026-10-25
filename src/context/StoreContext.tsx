@@ -96,6 +96,11 @@ interface StoreContextType {
   updateProduct: (productId: string, data: Partial<Product>) => void;
   deleteProduct: (productId: string) => void;
   adjustStock: (productId: string, storeId: string, quantityDelta: number, reason: string) => void;
+  toggleProductCashierVisibility: (productId: string, storeId?: string) => void;
+  setProductStoreStock: (productId: string, storeId: string, quantity: number) => void;
+  destroyStock: (productId: string, storeId: string, quantity: number, reason: string, notes?: string) => { success: boolean; message: string };
+  transferStock: (productId: string, fromStoreId: string, toStoreId: string, quantity: number, notes?: string) => { success: boolean; message: string };
+  batchEnableProductsForStore: (storeId: string, productIds: string[], isVisible: boolean) => void;
 
   // Sales
   sales: Sale[];
@@ -523,23 +528,20 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     []
   );
 
-  // Modelos de Caixa - Apenas Administrador Geral pode alterar!
+  // Modelos de Caixa - Seleção livre pelo operador do Caixa e Administrador
   const setCashierModel = useCallback(
     (model: CashierModelId) => {
-      if (currentUser.role !== 'general_manager') {
-        alert('Apenas o Administrador Geral possui autorização para alterar os modelos de caixa.');
-        return;
-      }
       setCashierModelState(model);
       addAuditLog(
         'ALTERAR_MODELO_CAIXA',
         'Modelos de Caixa',
-        `Administrador Geral definiu o modelo de caixa ativo para: ${model}`,
-        'normal'
+        `Operador ${currentUser.name} (${currentUser.role === 'general_manager' ? 'Administrador Geral' : currentUser.role === 'store_manager' ? 'Gerente' : 'Operador Caixa'}) selecionou o modelo: ${model}`,
+        'normal',
+        currentCashierStoreId
       );
       sound.success();
     },
-    [currentUser.role, addAuditLog]
+    [currentUser.name, currentUser.role, currentCashierStoreId, addAuditLog]
   );
 
   // Transações de Caixa (Sangrias e Suprimentos)
@@ -831,6 +833,197 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       })
     );
     addAuditLog('AJUSTE_ESTOQUE', `Produto ID: ${productId}`, `Ajuste: ${quantityDelta}. Motivo: ${reason}`, 'normal', storeId);
+  };
+
+  const toggleProductCashierVisibility = (productId: string, storeId?: string) => {
+    setProducts((prev) =>
+      prev.map((p) => {
+        if (p.id === productId) {
+          if (storeId) {
+            const currentVis =
+              p.visibleInStores && p.visibleInStores[storeId] !== undefined
+                ? p.visibleInStores[storeId]
+                : p.isVisibleInCashier !== false;
+            return {
+              ...p,
+              visibleInStores: {
+                ...(p.visibleInStores || {}),
+                [storeId]: !currentVis,
+              },
+            };
+          } else {
+            const currentVis = p.isVisibleInCashier !== false;
+            return {
+              ...p,
+              isVisibleInCashier: !currentVis,
+            };
+          }
+        }
+        return p;
+      })
+    );
+    sound.click();
+  };
+
+  const setProductStoreStock = (productId: string, storeId: string, quantity: number) => {
+    const qty = Math.max(0, quantity);
+    setProducts((prev) =>
+      prev.map((p) => {
+        if (p.id === productId) {
+          const updatedByStore = {
+            ...(p.stockByStore || {}),
+            [storeId]: qty,
+          };
+          const newTotal = Object.values(updatedByStore).reduce((a, b) => (a || 0) + (b || 0), 0);
+          return {
+            ...p,
+            stockQuantity: newTotal,
+            stockByStore: updatedByStore,
+          };
+        }
+        return p;
+      })
+    );
+    addAuditLog('DEFINIR_ESTOQUE_LOJA', `Produto ID: ${productId}`, `Estoque na loja ${storeId} alterado para ${qty}`, 'normal', storeId);
+  };
+
+  const destroyStock = (
+    productId: string,
+    storeId: string,
+    quantity: number,
+    reason: string,
+    notes?: string
+  ): { success: boolean; message: string } => {
+    const prod = products.find((p) => p.id === productId);
+    if (!prod) return { success: false, message: 'Produto não encontrado.' };
+    const currentStoreStock = prod.stockByStore[storeId] ?? 0;
+    if (quantity <= 0) return { success: false, message: 'A quantidade deve ser maior que zero.' };
+    if (quantity > currentStoreStock) {
+      return {
+        success: false,
+        message: `Quantidade para destruição (${quantity}) excede o estoque disponível nesta loja (${currentStoreStock} ${prod.unit}).`,
+      };
+    }
+
+    const store = stores.find((s) => s.id === storeId);
+    const storeName = store ? store.name : storeId;
+
+    setProducts((prev) =>
+      prev.map((p) => {
+        if (p.id === productId) {
+          const updatedStoreStock = Math.max(0, currentStoreStock - quantity);
+          const updatedByStore = {
+            ...(p.stockByStore || {}),
+            [storeId]: updatedStoreStock,
+          };
+          const updatedTotal = Object.values(updatedByStore).reduce((a, b) => (a || 0) + (b || 0), 0);
+          return {
+            ...p,
+            stockQuantity: updatedTotal,
+            stockByStore: updatedByStore,
+          };
+        }
+        return p;
+      })
+    );
+
+    addAuditLog(
+      'DESTRUICAO_ESTOQUE',
+      prod.name,
+      `Destruição / Baixa de ${quantity} ${prod.unit} na ${storeName}. Motivo: ${reason}. Obs: ${notes || 'Sem observações'}`,
+      'critical',
+      storeId,
+      storeName
+    );
+
+    addNotification({
+      type: 'LOW_STOCK',
+      severity: 'alert',
+      title: `Destruição de Estoque: ${prod.name}`,
+      message: `${quantity} ${prod.unit} baixados/destruídos na ${storeName}. Motivo: ${reason}.`,
+      storeId,
+      storeName,
+      actionRecommended: 'Verifique o laudo de descarte e avaria.',
+    });
+
+    sound.warning();
+    return {
+      success: true,
+      message: `${quantity} ${prod.unit} do produto "${prod.name}" baixados por destruição/descarte com sucesso na ${storeName}!`,
+    };
+  };
+
+  const transferStock = (
+    productId: string,
+    fromStoreId: string,
+    toStoreId: string,
+    quantity: number,
+    notes?: string
+  ): { success: boolean; message: string } => {
+    if (fromStoreId === toStoreId) {
+      return { success: false, message: 'As lojas de origem e destino devem ser diferentes.' };
+    }
+    const prod = products.find((p) => p.id === productId);
+    if (!prod) return { success: false, message: 'Produto não encontrado.' };
+    const fromStock = prod.stockByStore[fromStoreId] ?? 0;
+    if (quantity <= 0) return { success: false, message: 'A quantidade deve ser maior que zero.' };
+    if (quantity > fromStock) {
+      return {
+        success: false,
+        message: `Estoque insuficiente na loja de origem. Solicitado: ${quantity}, Disponível: ${fromStock}.`,
+      };
+    }
+
+    const fromStore = stores.find((s) => s.id === fromStoreId);
+    const toStore = stores.find((s) => s.id === toStoreId);
+
+    setProducts((prev) =>
+      prev.map((p) => {
+        if (p.id === productId) {
+          const updatedByStore = {
+            ...(p.stockByStore || {}),
+            [fromStoreId]: Math.max(0, fromStock - quantity),
+            [toStoreId]: (p.stockByStore[toStoreId] ?? 0) + quantity,
+          };
+          return {
+            ...p,
+            stockByStore: updatedByStore,
+          };
+        }
+        return p;
+      })
+    );
+
+    addAuditLog(
+      'TRANSFERENCIA_ESTOQUE',
+      prod.name,
+      `Transferência de ${quantity} ${prod.unit} de ${fromStore?.name || fromStoreId} para ${toStore?.name || toStoreId}. Obs: ${notes || ''}`,
+      'normal'
+    );
+
+    sound.success();
+    return {
+      success: true,
+      message: `Transferência de ${quantity} ${prod.unit} concluída com sucesso para ${toStore?.name || toStoreId}!`,
+    };
+  };
+
+  const batchEnableProductsForStore = (storeId: string, productIds: string[], isVisible: boolean) => {
+    setProducts((prev) =>
+      prev.map((p) => {
+        if (productIds.includes(p.id)) {
+          return {
+            ...p,
+            visibleInStores: {
+              ...(p.visibleInStores || {}),
+              [storeId]: isVisible,
+            },
+          };
+        }
+        return p;
+      })
+    );
+    sound.click();
   };
 
   // Register Sale
@@ -1400,6 +1593,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         updateProduct,
         deleteProduct,
         adjustStock,
+        toggleProductCashierVisibility,
+        setProductStoreStock,
+        destroyStock,
+        transferStock,
+        batchEnableProductsForStore,
         sales,
         registerSale,
         cancelSale,

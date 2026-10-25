@@ -8,6 +8,8 @@ import {
   Store as StoreIcon,
   CheckCircle,
   AlertTriangle,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { Product } from '../../types';
@@ -38,6 +40,8 @@ export const ProductManagementModal: React.FC<ProductManagementModalProps> = ({
   const [unit, setUnit] = useState('Unid');
   const [imageUrl, setImageUrl] = useState('');
   const [stockByStore, setStockByStore] = useState<Record<string, number>>({});
+  const [isVisibleInCashier, setIsVisibleInCashier] = useState<boolean>(true);
+  const [visibleInStores, setVisibleInStores] = useState<Record<string, boolean>>({});
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
 
@@ -54,6 +58,8 @@ export const ProductManagementModal: React.FC<ProductManagementModalProps> = ({
       setUnit(productToEdit.unit || 'Unid');
       setImageUrl(productToEdit.imageUrl || '');
       setStockByStore({ ...productToEdit.stockByStore });
+      setIsVisibleInCashier(productToEdit.isVisibleInCashier !== false);
+      setVisibleInStores({ ...(productToEdit.visibleInStores || {}) });
     } else {
       setName('');
       setCode(`PRD-${Math.floor(1000 + Math.random() * 9000)}`);
@@ -64,12 +70,16 @@ export const ProductManagementModal: React.FC<ProductManagementModalProps> = ({
       setSupplier('');
       setUnit('Unid');
       setImageUrl('');
-      // Initialize stock for all stores with 0
+      setIsVisibleInCashier(true);
+      // Initialize stock and visibility for all stores
       const initialStock: Record<string, number> = {};
+      const initialVis: Record<string, boolean> = {};
       stores.forEach((s) => {
         initialStock[s.id] = 20;
+        initialVis[s.id] = true;
       });
       setStockByStore(initialStock);
+      setVisibleInStores(initialVis);
     }
     setImageError(null);
   }, [productToEdit, stores, isOpen]);
@@ -129,6 +139,8 @@ export const ProductManagementModal: React.FC<ProductManagementModalProps> = ({
         imageUrl: imageUrl || 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=300&auto=format&fit=crop&q=80',
         stockQuantity: totalStockQuantity,
         stockByStore,
+        isVisibleInCashier,
+        visibleInStores,
       });
     } else {
       addProduct({
@@ -143,6 +155,8 @@ export const ProductManagementModal: React.FC<ProductManagementModalProps> = ({
         imageUrl: imageUrl || 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=300&auto=format&fit=crop&q=80',
         stockQuantity: totalStockQuantity,
         stockByStore,
+        isVisibleInCashier,
+        visibleInStores,
       });
     }
 
@@ -348,16 +362,50 @@ export const ProductManagementModal: React.FC<ProductManagementModalProps> = ({
               </div>
             </div>
 
+            {/* Habilitar Produto para Estar Visível no Caixa (PDV) */}
+            <div className="p-3.5 rounded-2xl bg-slate-950 border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h4 className="font-bold text-white text-xs flex items-center gap-1.5">
+                  <Eye className="w-4 h-4 text-emerald-400" />
+                  <span>Habilitar Produto para Estar Visível no Caixa (PDV)</span>
+                </h4>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Quando desabilitado, o produto não aparecerá nas buscas nem no catálogo dos operadores de caixa
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsVisibleInCashier(!isVisibleInCashier)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 self-start sm:self-center shrink-0 ${
+                  isVisibleInCashier
+                    ? 'bg-emerald-950 text-emerald-300 border-emerald-500/50 shadow-md shadow-emerald-950/40'
+                    : 'bg-red-950 text-red-400 border-red-500/40'
+                }`}
+              >
+                {isVisibleInCashier ? (
+                  <>
+                    <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Visível no Caixa</span>
+                  </>
+                ) : (
+                  <>
+                    <EyeOff className="w-3.5 h-3.5 text-red-400" />
+                    <span>Oculto no Caixa</span>
+                  </>
+                )}
+              </button>
+            </div>
+
             {/* Multi-Store Stock Distribution: Explicitly requested in prompt */}
             <div className="p-4 rounded-2xl bg-slate-950 border border-blue-500/30 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="font-bold text-white flex items-center gap-2">
                     <StoreIcon className="w-4 h-4 text-blue-400" />
-                    <span>Estoque Inicial por Loja (Todas as Lojas)</span>
+                    <span>Estoque e Visibilidade por Loja</span>
                   </h4>
                   <p className="text-[11px] text-slate-400">
-                    Defina a quantidade de estoque alocada em cada filial da rede:
+                    Defina a quantidade de estoque e se o produto fica visível no caixa de cada filial:
                   </p>
                 </div>
                 <div className="text-right">
@@ -371,14 +419,33 @@ export const ProductManagementModal: React.FC<ProductManagementModalProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
                 {stores.map((s) => {
                   const qty = stockByStore[s.id] ?? 0;
+                  const isVisibleInStore = visibleInStores[s.id] ?? true;
                   return (
                     <div
                       key={s.id}
                       className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between gap-2"
                     >
-                      <div className="truncate">
+                      <div className="truncate flex-1">
                         <span className="font-bold text-white text-xs truncate block">{s.name}</span>
-                        <span className="text-[10px] text-slate-400 font-mono">{s.city} • {s.code}</span>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="text-[10px] text-slate-400 font-mono">{s.city}</span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setVisibleInStores((prev) => ({
+                                ...prev,
+                                [s.id]: !isVisibleInStore,
+                              }))
+                            }
+                            className={`px-1.5 py-0.2 rounded text-[9px] font-bold border transition-colors cursor-pointer ${
+                              isVisibleInStore
+                                ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40'
+                                : 'bg-red-950/80 text-red-400 border-red-500/40'
+                            }`}
+                          >
+                            {isVisibleInStore ? 'Caixa ON' : 'Caixa OFF'}
+                          </button>
+                        </div>
                       </div>
                       <div className="w-24 shrink-0">
                         <input

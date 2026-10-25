@@ -88,9 +88,18 @@ export const CashierPOS: React.FC = () => {
       : currentCashierStoreId;
   const currentStore = stores.find((s) => s.id === effectiveStoreId) || stores[0];
 
-  // Active view: 'pos' (Venda) | 'history' (Minhas Vendas) | 'shift' (Fecho de Caixa)
+  // Active view: 'pos' (Venda) | 'history' (Minhas Vendas) | 'shift' (Início e Término de Sessão)
   const [activeTab, setActiveTab] = useState<'pos' | 'history' | 'shift'>('pos');
   const [registeredClosureNotice, setRegisteredClosureNotice] = useState<string | null>(null);
+
+  // Session lifecycle: Início e Término de Sessão para cada caixa
+  const [sessionStatus, setSessionStatus] = useState<'OPEN' | 'CLOSED'>('OPEN');
+  const [sessionOpenedAt, setSessionOpenedAt] = useState<string>(() =>
+    new Date(Date.now() - 4 * 3600 * 1000).toISOString()
+  );
+  const [sessionInitialCash, setSessionInitialCash] = useState<number>(1000);
+  const [sessionCountedCash, setSessionCountedCash] = useState<string>('');
+  const [sessionClosureNotes, setSessionClosureNotes] = useState<string>('');
 
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -120,7 +129,6 @@ export const CashierPOS: React.FC = () => {
   const [isCameraBarcodeOpen, setIsCameraBarcodeOpen] = useState(false);
   const [isSangriaModalOpen, setIsSangriaModalOpen] = useState(false);
   const [isPrinterModalOpen, setIsPrinterModalOpen] = useState(false);
-  const [showAdminLockNotice, setShowAdminLockNotice] = useState(false);
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -133,9 +141,20 @@ export const CashierPOS: React.FC = () => {
     return ['ALL', ...Array.from(set)];
   }, [products]);
 
-  // Filtered products for active store
+  // Filtered products for active store (strictly obeys isVisibleInCashier & visibleInStores)
   const filteredProducts = useMemo(() => {
     return products.filter((p) => {
+      // 1. Check if product is enabled for Cashier POS
+      const isGloballyVisible = p.isVisibleInCashier !== false;
+      const isStoreVisible =
+        p.visibleInStores && p.visibleInStores[effectiveStoreId] !== undefined
+          ? p.visibleInStores[effectiveStoreId]
+          : isGloballyVisible;
+
+      if (!isGloballyVisible || !isStoreVisible) {
+        return false;
+      }
+
       const matchSearch =
         p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -143,7 +162,7 @@ export const CashierPOS: React.FC = () => {
       const matchCategory = selectedCategory === 'ALL' || p.category === selectedCategory;
       return matchSearch && matchCategory;
     });
-  }, [products, searchQuery, selectedCategory]);
+  }, [products, searchQuery, selectedCategory, effectiveStoreId]);
 
   // Calculations
   const cartSubtotal = useMemo(() => {
@@ -409,13 +428,14 @@ export const CashierPOS: React.FC = () => {
             </button>
             <button
               onClick={() => setActiveTab('shift')}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
                 activeTab === 'shift'
                   ? `${activeThemeConfig.buttonClass}`
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              Fecho de Caixa
+              <Clock className="w-3.5 h-3.5" />
+              <span>Início & Término de Sessão</span>
             </button>
           </div>
 
@@ -467,45 +487,31 @@ export const CashierPOS: React.FC = () => {
           {/* Cashier Model Selector & Quick Action Bar */}
           <div className="flex flex-wrap items-center justify-between gap-2 pb-3 mb-3 border-b border-slate-800 text-xs">
             <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-1">
-              {/* Role badge indicating Admin or Cashier access */}
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-800 text-slate-300">
-                {currentUser.role === 'general_manager' ? (
-                  <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-400">
-                    <Sliders className="w-3.5 h-3.5" /> Administrador (Livre)
-                  </span>
-                ) : (
-                  <button
-                    onClick={() => setShowAdminLockNotice(true)}
-                    className="flex items-center gap-1 text-[11px] font-bold text-amber-400 hover:text-amber-300"
-                    title="Configuração de modelo restrita ao Administrador Geral"
-                  >
-                    <Lock className="w-3.5 h-3.5" /> Modelo Gerido Centralmente
-                  </button>
-                )}
+              {/* Badge: Escolha livre do modelo de caixa */}
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-sky-500/40 text-sky-300 font-bold text-xs shrink-0">
+                <Sliders className="w-3.5 h-3.5 text-sky-400" />
+                <span>Modelo do Caixa:</span>
               </div>
 
-              {/* Models List */}
+              {/* Models List - Livre para o Caixa escolher */}
               {CASHIER_MODELS_LIST.map((model) => {
                 const isActive = cashierModel === model.id;
                 return (
                   <button
                     key={model.id}
                     onClick={() => {
-                      if (currentUser.role === 'general_manager') {
-                        setCashierModel(model.id);
-                        if (model.id === 'modelo_ed_supermercado') setCashierLayoutMode('computador_3col');
-                        else if (model.id === 'modelo_tablet_keypad') setCashierLayoutMode('tablet_keypad');
-                        else if (model.id === 'modelo_celular_1col') setCashierLayoutMode('celular_1col');
-                        else if (model.id === 'modelo_passo_a_passo') setCashierLayoutMode('passo_a_passo');
-                      } else {
-                        setShowAdminLockNotice(true);
-                      }
+                      setCashierModel(model.id);
+                      if (model.id === 'modelo_ed_supermercado') setCashierLayoutMode('computador_3col');
+                      else if (model.id === 'modelo_tablet_keypad') setCashierLayoutMode('tablet_keypad');
+                      else if (model.id === 'modelo_celular_1col') setCashierLayoutMode('celular_1col');
+                      else if (model.id === 'modelo_passo_a_passo') setCashierLayoutMode('passo_a_passo');
                     }}
-                    className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 transition-all ${
+                    className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap text-xs ${
                       isActive
                         ? `${activeThemeConfig.buttonClass} shadow-md`
-                        : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white'
+                        : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white hover:border-slate-700'
                     }`}
+                    title={`Ativar ${model.name}`}
                   >
                     <span>{model.name}</span>
                     {isActive && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />}
@@ -1712,43 +1718,288 @@ export const CashierPOS: React.FC = () => {
         </div>
       )}
 
-      {/* ===================== TAB 3: FECHO DE CAIXA ===================== */}
+      {/* ===================== TAB 3: INÍCIO E TÉRMINO DE SESSÃO ===================== */}
       {activeTab === 'shift' && (
-        <div className="flex-1 max-w-2xl mx-auto w-full p-4 sm:p-6">
-          <div className={`${activeThemeConfig.cardClass} rounded-3xl p-6 shadow-2xl space-y-4`}>
-            <div className="flex items-center gap-3 pb-3 border-b border-slate-800">
-              <div className="w-10 h-10 rounded-2xl bg-orange-500/20 text-orange-400 flex items-center justify-center">
-                <Clock className="w-5 h-5" />
+        <div className="flex-1 max-w-3xl mx-auto w-full p-4 sm:p-6 space-y-5">
+          <div className={`${activeThemeConfig.cardClass} rounded-3xl p-6 shadow-2xl space-y-5`}>
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-800 gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-orange-500/20 text-orange-400 flex items-center justify-center border border-orange-500/30">
+                  <Clock className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base sm:text-lg text-white">
+                    Início e Término de Sessão de Caixa
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    {currentStore.name} • Operador: <strong className="text-white">{currentUser.name}</strong>
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="font-bold text-base text-white">Relatório de Fecho de Caixa</h3>
-                <p className="text-xs text-slate-400">{currentStore.name} • {currentUser.name}</p>
+
+              <div className="flex items-center gap-2">
+                <span
+                  className={`px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5 ${
+                    sessionStatus === 'OPEN'
+                      ? 'bg-emerald-950 text-emerald-400 border-emerald-500/40 shadow-sm shadow-emerald-950'
+                      : 'bg-red-950 text-red-400 border-red-500/40'
+                  }`}
+                >
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      sessionStatus === 'OPEN' ? 'bg-emerald-400 animate-ping' : 'bg-red-400'
+                    }`}
+                  />
+                  <span>{sessionStatus === 'OPEN' ? 'Sessão ABERTA' : 'Sessão ENCERRADA'}</span>
+                </span>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800">
-                <span className="text-xs text-slate-400 block mb-1">Vendas Concluídas</span>
-                <span className="font-mono font-bold text-2xl text-white">{mySales.length}</span>
-              </div>
-              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800">
-                <span className="text-xs text-slate-400 block mb-1">Total do Turno</span>
-                <span className="font-mono font-bold text-2xl text-emerald-400">{todayTotalRevenue.toFixed(2)} MZN</span>
-              </div>
-            </div>
+            {/* IF SESSION IS CLOSED: START SESSION FORM */}
+            {sessionStatus === 'CLOSED' && (
+              <div className="p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
+                <div className="flex items-center gap-2 text-white font-bold text-sm">
+                  <CheckCircle className="w-4 h-4 text-orange-400" />
+                  <span>Abertura de Turno / Iniciar Nova Sessão</span>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Informe o Fundo de Maneio / Troco Inicial disponível na gaveta para iniciar as operações de venda neste terminal.
+                </p>
 
-            <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 text-xs space-y-1">
-              <p className="font-bold text-slate-300 uppercase mb-2">Discriminação de Gaveta</p>
-              {['DINHEIRO', 'M_PESA', 'POS_CARTAO', 'E_MOLA'].map((m) => {
-                const sub = mySales.filter((s) => s.paymentMethod === m).reduce((a, b) => a + b.total, 0);
-                return (
-                  <div key={m} className="flex justify-between py-1 border-b border-slate-800/60 font-mono">
-                    <span className="text-slate-400">{m}:</span>
-                    <span className="font-bold text-white">{sub.toFixed(2)} MZN</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                  <div>
+                    <label className="block text-slate-400 text-xs mb-1 font-semibold">
+                      Fundo de Troco Inicial (MZN):
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="100"
+                      value={sessionInitialCash}
+                      onChange={(e) => setSessionInitialCash(parseFloat(e.target.value) || 0)}
+                      className="w-full p-3 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono font-bold text-base outline-none focus:border-orange-500"
+                    />
                   </div>
-                );
-              })}
-            </div>
+
+                  <div>
+                    <label className="block text-slate-400 text-xs mb-1 font-semibold">
+                      Loja / Terminal Atribuído:
+                    </label>
+                    <div className="p-3 rounded-xl bg-slate-900 border border-slate-700 text-white font-bold text-xs truncate">
+                      {currentStore.name} ({currentStore.city})
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSessionStatus('OPEN');
+                    setSessionOpenedAt(new Date().toISOString());
+                    setRegisteredClosureNotice(null);
+                    sound.success();
+                  }}
+                  className="w-full py-3.5 px-4 rounded-2xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-orange-950/50 cursor-pointer active:scale-98 transition-all"
+                >
+                  <Clock className="w-4 h-4" />
+                  <span>🚀 Iniciar Sessão & Abrir Caixa</span>
+                </button>
+              </div>
+            )}
+
+            {/* IF SESSION IS OPEN: SESSION DASHBOARD & CLOSURE FORM */}
+            {sessionStatus === 'OPEN' && (
+              <div className="space-y-4">
+                {/* Session Live Details */}
+                <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="text-slate-400">
+                      Iniciada em:{' '}
+                      <strong className="text-white font-mono">
+                        {new Date(sessionOpenedAt).toLocaleTimeString('pt-MZ')}{' '}
+                        ({new Date(sessionOpenedAt).toLocaleDateString('pt-MZ')})
+                      </strong>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsSangriaModalOpen(true)}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 font-semibold border border-slate-700 text-[11px] flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>Sangria / Suprimento</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 font-mono text-xs">
+                    <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+                      <span className="text-[10px] text-slate-400 block">Fundo Inicial</span>
+                      <span className="font-bold text-blue-400 text-sm">{sessionInitialCash.toFixed(2)}</span>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+                      <span className="text-[10px] text-slate-400 block">Vendas Concluídas</span>
+                      <span className="font-bold text-white text-sm">{mySales.length}</span>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+                      <span className="text-[10px] text-slate-400 block">Total do Turno</span>
+                      <span className="font-bold text-emerald-400 text-sm">{todayTotalRevenue.toFixed(2)}</span>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+                      <span className="text-[10px] text-slate-400 block">Gaveta Esperada</span>
+                      {(() => {
+                        const cashSales = mySales
+                          .filter((s) => s.paymentMethod === 'DINHEIRO')
+                          .reduce((a, b) => a + b.total, 0);
+                        const expectedCash = sessionInitialCash + cashSales;
+                        return (
+                          <span className="font-bold text-amber-400 text-sm">
+                            {expectedCash.toFixed(2)} MZN
+                          </span>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Discriminação por Forma de Pagamento */}
+                <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 text-xs space-y-1.5 font-mono">
+                  <p className="font-bold text-slate-300 uppercase mb-2 font-sans">
+                    Apuração por Método de Pagamento no Turno:
+                  </p>
+                  {['DINHEIRO', 'M_PESA', 'E_MOLA', 'POS_CARTAO'].map((m) => {
+                    const sub = mySales.filter((s) => s.paymentMethod === m).reduce((a, b) => a + b.total, 0);
+                    return (
+                      <div key={m} className="flex justify-between py-1 border-b border-slate-800/60">
+                        <span className="text-slate-400 font-sans">{m}:</span>
+                        <span className="font-bold text-white">{sub.toFixed(2)} MZN</span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Form: Término de Sessão */}
+                <div className="p-4 rounded-2xl bg-slate-950 border border-orange-500/30 space-y-3">
+                  <div className="flex items-center gap-2 text-white font-bold text-xs uppercase tracking-wider text-orange-400">
+                    <Clock className="w-4 h-4" />
+                    <span>Conferência de Término de Sessão</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-400 text-xs mb-1">
+                        Dinheiro Contado na Gaveta (MZN):
+                      </label>
+                      {(() => {
+                        const cashSales = mySales
+                          .filter((s) => s.paymentMethod === 'DINHEIRO')
+                          .reduce((a, b) => a + b.total, 0);
+                        const expectedCash = sessionInitialCash + cashSales;
+                        const counted = parseFloat(sessionCountedCash) || expectedCash;
+                        const diff = counted - expectedCash;
+
+                        return (
+                          <div>
+                            <input
+                              type="number"
+                              step="50"
+                              value={sessionCountedCash || expectedCash.toString()}
+                              onChange={(e) => setSessionCountedCash(e.target.value)}
+                              className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono font-bold text-sm outline-none"
+                            />
+                            <span
+                              className={`text-[11px] block mt-1 font-mono font-semibold ${
+                                diff === 0
+                                  ? 'text-emerald-400'
+                                  : diff < 0
+                                  ? 'text-red-400'
+                                  : 'text-amber-400'
+                              }`}
+                            >
+                              Diferença: {diff === 0 ? '0.00 MZN (Exato)' : `${diff > 0 ? '+' : ''}${diff.toFixed(2)} MZN`}
+                            </span>
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-400 text-xs mb-1">Observações do Fecho:</label>
+                      <input
+                        type="text"
+                        value={sessionClosureNotes}
+                        onChange={(e) => setSessionClosureNotes(e.target.value)}
+                        placeholder="Ex: Turno encerrado sem divergências / Sangria realizada"
+                        className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cashTotal = mySales
+                          .filter((s) => s.paymentMethod === 'DINHEIRO')
+                          .reduce((a, b) => a + b.total, 0);
+                        const mpesaTotal = mySales
+                          .filter((s) => s.paymentMethod === 'M_PESA')
+                          .reduce((a, b) => a + b.total, 0);
+                        const emolaTotal = mySales
+                          .filter((s) => s.paymentMethod === 'E_MOLA')
+                          .reduce((a, b) => a + b.total, 0);
+                        const cardTotal = mySales
+                          .filter((s) => s.paymentMethod === 'POS_CARTAO')
+                          .reduce((a, b) => a + b.total, 0);
+
+                        const expectedCash = sessionInitialCash + cashTotal;
+                        const counted = parseFloat(sessionCountedCash) || expectedCash;
+                        const diff = counted - expectedCash;
+
+                        const closure = registerShiftClosure({
+                          storeId: currentStore.id,
+                          storeName: currentStore.name,
+                          cashierId: currentUser.id,
+                          cashierName: currentUser.name,
+                          openedAt: sessionOpenedAt,
+                          initialCash: sessionInitialCash,
+                          totalSalesCash: cashTotal,
+                          totalSalesMpesa: mpesaTotal,
+                          totalSalesEmola: emolaTotal,
+                          totalSalesCard: cardTotal,
+                          totalSalesGross: todayTotalRevenue,
+                          totalDiscounts: 0,
+                          totalSangrias: 0,
+                          totalReforcos: 0,
+                          expectedCashInDrawer: expectedCash,
+                          actualCashInDrawer: counted,
+                          difference: diff,
+                          salesCount: mySales.length,
+                          notes: sessionClosureNotes || 'Fecho de turno encerrado com sucesso',
+                        });
+
+                        setSessionStatus('CLOSED');
+                        sound.success();
+                        setRegisteredClosureNotice(
+                          `Sessão encerrada com sucesso! Fecho nº ${closure.closureNumber} gravado e transmitido ao Servidor Mãe.`
+                        );
+                      }}
+                      className="py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 cursor-pointer active:scale-98 transition-all"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>Encerrar Sessão & Gravar Fecho</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => window.print()}
+                      className="py-3 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 border border-slate-700 cursor-pointer transition-colors"
+                    >
+                      <Printer className="w-4 h-4 text-orange-400" />
+                      <span>Imprimir Comprovativo</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {registeredClosureNotice && (
               <div className="p-3.5 rounded-2xl bg-emerald-950/80 border border-emerald-500/50 text-emerald-200 text-xs flex items-center gap-2 animate-in fade-in">
@@ -1761,64 +2012,6 @@ export const CashierPOS: React.FC = () => {
                 </div>
               </div>
             )}
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
-              <button
-                onClick={() => {
-                  const cashTotal = mySales
-                    .filter((s) => s.paymentMethod === 'DINHEIRO')
-                    .reduce((a, b) => a + b.total, 0);
-                  const mpesaTotal = mySales
-                    .filter((s) => s.paymentMethod === 'M_PESA')
-                    .reduce((a, b) => a + b.total, 0);
-                  const emolaTotal = mySales
-                    .filter((s) => s.paymentMethod === 'E_MOLA')
-                    .reduce((a, b) => a + b.total, 0);
-                  const cardTotal = mySales
-                    .filter((s) => s.paymentMethod === 'POS_CARTAO')
-                    .reduce((a, b) => a + b.total, 0);
-
-                  const closure = registerShiftClosure({
-                    storeId: currentStore.id,
-                    storeName: currentStore.name,
-                    cashierId: currentUser.id,
-                    cashierName: currentUser.name,
-                    openedAt: new Date(Date.now() - 8 * 3600 * 1000).toISOString(),
-                    initialCash: 1000,
-                    totalSalesCash: cashTotal,
-                    totalSalesMpesa: mpesaTotal,
-                    totalSalesEmola: emolaTotal,
-                    totalSalesCard: cardTotal,
-                    totalSalesGross: todayTotalRevenue,
-                    totalDiscounts: 0,
-                    totalSangrias: 0,
-                    totalReforcos: 0,
-                    expectedCashInDrawer: 1000 + cashTotal,
-                    actualCashInDrawer: 1000 + cashTotal,
-                    difference: 0,
-                    salesCount: mySales.length,
-                    notes: 'Fecho diário registrado e enviado ao Servidor Mãe Supabase',
-                  });
-
-                  sound.success();
-                  setRegisteredClosureNotice(
-                    `Fecho nº ${closure.closureNumber} registrado com sucesso!`
-                  );
-                }}
-                className="py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 cursor-pointer active:scale-98 transition-all"
-              >
-                <Check className="w-4 h-4" />
-                <span>Registrar Fecho Diário</span>
-              </button>
-
-              <button
-                onClick={() => window.print()}
-                className="py-3 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 border border-slate-700 cursor-pointer transition-colors"
-              >
-                <Printer className="w-4 h-4 text-orange-400" />
-                <span>Imprimir Fecho</span>
-              </button>
-            </div>
           </div>
         </div>
       )}
@@ -1834,13 +2027,7 @@ export const CashierPOS: React.FC = () => {
               <X className="w-4 h-4" />
             </button>
 
-            {/* Active Printer Badge for Space Optimization */}
-            <div className="flex items-center justify-center gap-1.5 py-1 px-2 mb-2 rounded-xl bg-slate-100 border border-slate-200 text-[10px] font-mono text-slate-600">
-              <Printer className="w-3 h-3 text-slate-500" />
-              <span>{activePrinter.name} ({activePrinterWidth})</span>
-            </div>
-
-            {/* Exactly formatted as in Photo 1 & 2 */}
+            {/* Formatted Invoice / Receipt */}
             <div className="receipt-content font-mono text-center space-y-2">
               <div className="border-b border-slate-300 pb-2">
                 <h4 className="font-black text-sm uppercase tracking-wider text-black">
@@ -1908,9 +2095,9 @@ export const CashierPOS: React.FC = () => {
             <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
               <button
                 onClick={() => window.print()}
-                className="py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold flex items-center justify-center gap-1.5"
+                className="py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold flex items-center justify-center gap-1.5 cursor-pointer"
               >
-                <Printer className="w-3.5 h-3.5" /> Imprimir ({activePrinterWidth})
+                <Printer className="w-3.5 h-3.5" /> Imprimir Factura / Talão
               </button>
               <button
                 onClick={() => setCompletedSale(null)}
@@ -1967,32 +2154,6 @@ export const CashierPOS: React.FC = () => {
         isOpen={isPrinterModalOpen}
         onClose={() => setIsPrinterModalOpen(false)}
       />
-
-      {/* Admin Lock Notice Modal (When cashier attempts to change locked cashier model) */}
-      {showAdminLockNotice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-in fade-in">
-          <div className="w-full max-w-md bg-slate-900 border border-amber-500/50 rounded-3xl p-6 shadow-2xl text-slate-100 space-y-4">
-            <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center mx-auto">
-              <Lock className="w-6 h-6" />
-            </div>
-            <div className="text-center space-y-2">
-              <h3 className="text-base font-black text-white">Configuração Restrita ao Administrador Geral</h3>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                Apenas o <strong>Administrador Geral (Kelsson Moisés)</strong> tem permissão para alterar o Modelo de Caixa ativo (Modelo Ed Supermercado, Modelo Nati, Tablet ou Celular).
-              </p>
-              <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 text-[11px] text-amber-300/90 text-left">
-                🔒 <strong>Regra de Conformidade:</strong> O layout do terminal é definido centralmente para garantir a integridade dos relatórios tributários e a ergonomia de cada loja.
-              </div>
-            </div>
-            <button
-              onClick={() => setShowAdminLockNotice(false)}
-              className="w-full py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs uppercase transition-all shadow-lg active:scale-95"
-            >
-              Compreendido
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

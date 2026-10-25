@@ -149,6 +149,10 @@ class SoundService {
   public cashDrawer() {
     this.playSaleSuccess();
   }
+
+  public warning() {
+    this.playAlert();
+  }
 }
 
 export const sound = new SoundService();
