@@ -18,7 +18,6 @@ import {
   Moon,
   Printer,
   Sparkles,
-  LogOut,
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 
@@ -37,7 +36,6 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const {
     currentUser,
-    logout,
     switchUser,
     users,
     lockScreen,
@@ -95,11 +93,15 @@ export const Navbar: React.FC<NavbarProps> = ({
                 className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${
                   currentUser.role === 'general_manager'
                     ? 'bg-blue-950 text-blue-300 border-blue-500/50 shadow-sm'
+                    : currentUser.role === 'store_manager'
+                    ? 'bg-emerald-950 text-emerald-300 border-emerald-500/50 shadow-sm'
                     : 'bg-amber-950 text-amber-300 border-amber-500/50 shadow-sm'
                 }`}
               >
                 {currentUser.role === 'general_manager'
                   ? 'ADMINISTRADOR GERAL 💙'
+                  : currentUser.role === 'store_manager'
+                  ? 'GERENTE DE LOJA'
                   : 'VENDEDOR CAIXA'}
               </span>
             </div>
@@ -280,6 +282,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <p className="text-[10px] text-slate-400 capitalize">
                   {currentUser.role === 'general_manager'
                     ? 'Administrador Geral'
+                    : currentUser.role === 'store_manager'
+                    ? 'Gerente de Loja'
                     : 'Vendedor Caixa'}
                 </p>
               </div>
@@ -305,6 +309,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                     const roleLabel =
                       u.role === 'general_manager'
                         ? 'Administrador Geral 💙'
+                        : u.role === 'store_manager'
+                        ? `Gerente • ${u.assignedStoreName}`
                         : `Caixa • ${u.assignedStoreName}`;
 
                     return (
@@ -339,20 +345,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                       </button>
                     );
                   })}
-                </div>
-
-                {/* Terminar Sessão (Sair) Button */}
-                <div className="pt-2 mt-2 border-t border-slate-800">
-                  <button
-                    onClick={() => {
-                      setShowUserMenu(false);
-                      logout();
-                    }}
-                    className="w-full flex items-center justify-center gap-2 p-2 rounded-xl text-xs font-bold text-red-400 hover:bg-red-950/40 hover:text-red-300 border border-red-500/30 transition-colors cursor-pointer"
-                  >
-                    <LogOut className="w-3.5 h-3.5" />
-                    <span>Terminar Sessão (Sair)</span>
-                  </button>
                 </div>
               </div>
             )}

@@ -1,26 +1,9 @@
-export type Role = 'super_admin' | 'company_admin' | 'general_manager' | 'cashier';
+export type Role = 'general_manager' | 'store_manager' | 'cashier';
 
 export type PaymentMethod = 'M_PESA' | 'E_MOLA' | 'DINHEIRO' | 'POS_CARTAO' | 'TRANSFERENCIA';
 
-export interface Company {
-  id: string; // Identificador único da empresa (empresa_id)
-  name: string; // Nome comercial da empresa
-  nuit: string; // NUIT da empresa
-  ownerName: string; // Nome do proprietário/administrador
-  ownerEmail: string; // Gmail do proprietário
-  ownerPhone: string; // Telefone moçambicano
-  currency: string; // Moeda padrão (MZN, USD, ZAR, EUR)
-  city: string; // Cidade sede
-  address: string; // Endereço da sede
-  logoUrl?: string; // Logotipo oficial da empresa
-  plan: 'gratuito' | 'profissional' | 'empresarial';
-  status: 'active' | 'suspended';
-  createdAt: string;
-}
-
 export interface Store {
   id: string;
-  companyId: string; // Vínculo estrito com a empresa proprietária
   name: string;
   code: string;
   address: string;
@@ -31,10 +14,10 @@ export interface Store {
   isOnline: boolean;
   lastSync: string;
   cashierIds: string[];
-  responsibleName?: string;
+  managerName: string;
+  managerId?: string;
   dailySalesTarget: number; // Meta diária em MZN
-  imageUrl?: string; // Foto da Loja
-  logoUrl?: string; // Logotipo oficial da loja para facturas
+  imageUrl?: string; // Foto da Loja (mínimo 5MB suportado)
   createdAt: string;
 }
 
@@ -51,17 +34,16 @@ export interface UserPermissions {
 
 export interface User {
   id: string;
-  companyId: string; // Isolamento estrito por empresa
   name: string;
   email: string;
   role: Role;
-  assignedStoreId: string; // 'ALL' for general manager / company admin
+  assignedStoreId: string; // 'ALL' for general manager
   assignedStoreName: string;
   pin: string; // 4-digit PIN for quick cashier lock
-  password?: string; // Senha completa para visualização/gestão pelo Administrador
+  password?: string; // Senha completa para visualização/gestão pelo Administrador Geral
   phone: string;
   identificationNumber?: string; // BI / Documento de identificação
-  avatarUrl?: string; // Foto de perfil
+  avatarUrl?: string; // Foto de perfil (mínimo 5MB suportado)
   isActive: boolean;
   permissions: UserPermissions;
   lastLogin: string;
@@ -70,7 +52,6 @@ export interface User {
 
 export interface Product {
   id: string;
-  companyId: string; // Isolamento estrito por empresa
   name: string;
   code: string; // SKU or Barcode
   category: string;
@@ -117,7 +98,6 @@ export interface SaleItem {
 
 export interface Sale {
   id: string;
-  companyId: string; // Vínculo estrito com a empresa
   saleNumber: string;
   storeId: string;
   storeName: string;
@@ -152,7 +132,6 @@ export interface Sale {
 
 export interface Expense {
   id: string;
-  companyId: string; // Vínculo estrito com a empresa
   storeId: string;
   storeName: string;
   title: string;
@@ -222,7 +201,6 @@ export interface AuditLog {
 
 export interface Customer {
   id: string;
-  companyId?: string;
   name: string;
   phone: string;
   bairro: string;
@@ -309,7 +287,6 @@ export interface PrinterConfig {
 // Sangria e Reforço de Caixa
 export interface CashTransaction {
   id: string;
-  companyId?: string;
   storeId: string;
   storeName: string;
   cashierId: string;
@@ -325,7 +302,6 @@ export interface CashTransaction {
 // Fecho Diário de Caixa Registrado
 export interface ShiftClosure {
   id: string;
-  companyId?: string;
   closureNumber: string;
   storeId: string;
   storeName: string;

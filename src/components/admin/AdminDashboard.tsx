@@ -114,7 +114,7 @@ export const AdminDashboard: React.FC = () => {
   const [isSangriaModalOpen, setIsSangriaModalOpen] = useState(false);
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [userToEdit, setUserToEdit] = useState<User | null>(null);
-  const [preselectedRoleForUser, setPreselectedRoleForUser] = useState<'general_manager' | 'cashier' | undefined>(undefined);
+  const [preselectedRoleForUser, setPreselectedRoleForUser] = useState<'general_manager' | 'store_manager' | 'cashier' | undefined>(undefined);
   const [preselectedStoreForUser, setPreselectedStoreForUser] = useState<string | undefined>(undefined);
   const [isProductManagementModalOpen, setIsProductManagementModalOpen] = useState(false);
   const [productToEdit, setProductToEdit] = useState<Product | null>(null);
@@ -794,20 +794,39 @@ export const AdminDashboard: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Direct Action Badges: Responsável, +Caixa, +Produtos, +Fecho Diário */}
+                        {/* Direct Action Badges: +Gerente, +Caixa, +Produtos, +Fecho Diário */}
                         <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-900 text-xs">
-                          {/* 1. Responsável / Administrador */}
-                          <div className="p-2 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[11px] text-slate-400">Responsável:</span>
-                              <span className="text-[10px] font-mono font-bold text-blue-400 truncate max-w-[80px]">
-                                {st.responsibleName || 'Kelsson M.'}
-                              </span>
-                            </div>
-                            <span className="mt-1.5 py-1 px-2 rounded-lg bg-blue-950/60 text-blue-300 text-[10px] font-bold border border-blue-500/30 text-center">
-                              Admin Geral 💙
-                            </span>
-                          </div>
+                          {/* 2. + Gerente */}
+                          {(() => {
+                            const storeManagers = users.filter(
+                              (u) =>
+                                (u.assignedStoreId === st.id || u.assignedStoreName === st.name) &&
+                                u.role === 'store_manager'
+                            );
+                            return (
+                              <div className="p-2 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[11px] text-slate-400">Gerentes:</span>
+                                  <span className="font-mono font-bold text-blue-400">
+                                    {storeManagers.length}
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setUserToEdit(null);
+                                    setPreselectedRoleForUser('store_manager');
+                                    setPreselectedStoreForUser(st.id);
+                                    setIsUserModalOpen(true);
+                                  }}
+                                  className="mt-1.5 py-1 px-2 rounded-lg bg-blue-600/30 hover:bg-blue-600 text-blue-300 hover:text-white text-[10px] font-bold border border-blue-500/40 flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                  <span>+ Gerente</span>
+                                </button>
+                              </div>
+                            );
+                          })()}
 
                           {/* 3. + Caixa */}
                           {(() => {
@@ -912,7 +931,7 @@ export const AdminDashboard: React.FC = () => {
                           <strong className="text-slate-400">NUIT Fiscal:</strong> {st.nuit}
                         </p>
                         <p>
-                          <strong className="text-slate-400">Responsável:</strong> {st.responsibleName || 'Administrador Geral'}
+                          <strong className="text-slate-400">Responsável:</strong> {st.managerName}
                         </p>
                       </div>
                     </div>
@@ -1323,11 +1342,15 @@ export const AdminDashboard: React.FC = () => {
                       className={`text-[10px] font-bold px-2 py-0.5 rounded ${
                         u.role === 'general_manager'
                           ? 'bg-blue-950 text-blue-300 border border-blue-500/50'
+                          : u.role === 'store_manager'
+                          ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/50'
                           : 'bg-amber-950 text-amber-300 border border-amber-500/50'
                       }`}
                     >
                       {u.role === 'general_manager'
                         ? 'Administrador Geral 💙'
+                        : u.role === 'store_manager'
+                        ? 'Gerente de Loja 🟢'
                         : 'Vendedor Caixa 🟡'}
                     </span>
                   </div>
@@ -2329,7 +2352,7 @@ export const AdminDashboard: React.FC = () => {
                   status: 'active',
                   isOnline: true,
                   cashierIds: [],
-                  responsibleName: storeForm.managerName || 'Responsável Local',
+                  managerName: storeForm.managerName || 'Responsável Local',
                 });
                 setShowStoreModal(false);
               }}
