@@ -1,4 +1,4 @@
-export type Role = 'general_manager' | 'store_manager' | 'cashier';
+export type Role = 'general_manager' | 'cashier';
 
 export type PaymentMethod = 'M_PESA' | 'E_MOLA' | 'DINHEIRO' | 'POS_CARTAO' | 'TRANSFERENCIA';
 
@@ -14,10 +14,10 @@ export interface Store {
   isOnline: boolean;
   lastSync: string;
   cashierIds: string[];
-  managerName: string;
-  managerId?: string;
+  responsibleName?: string;
   dailySalesTarget: number; // Meta diária em MZN
-  imageUrl?: string; // Foto da Loja (mínimo 5MB suportado)
+  imageUrl?: string; // Foto da Loja
+  logoUrl?: string; // Logotipo oficial da loja para facturas
   createdAt: string;
 }
 

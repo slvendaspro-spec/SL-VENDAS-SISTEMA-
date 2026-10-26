@@ -3,19 +3,19 @@ import { StoreProvider, useStore } from './context/StoreContext';
 import { Navbar } from './components/layout/Navbar';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { CashierPOS } from './components/cashier/CashierPOS';
+import { LoginPortal } from './components/auth/LoginPortal';
 import { PinLockModal } from './components/security/PinLockModal';
 import { TwoFactorModal } from './components/security/TwoFactorModal';
 import { ImplementationGuideModal } from './components/modals/ImplementationGuideModal';
 import { NotificationsDrawer } from './components/modals/NotificationsDrawer';
 import { ThemeCustomizerModal } from './components/modals/ThemeCustomizerModal';
 import { PrinterSettingsModal } from './components/modals/PrinterSettingsModal';
-
-import { StoreManagerDashboard } from './components/manager/StoreManagerDashboard';
 import { Laptop, Tablet, Smartphone, RefreshCw } from 'lucide-react';
 
 const AppContent: React.FC = () => {
   const {
     currentUser,
+    isAuthenticated,
     twoFactorRequired,
     setTwoFactorRequired,
     colorMode,
@@ -27,6 +27,11 @@ const AppContent: React.FC = () => {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
   const [isPrinterModalOpen, setIsPrinterModalOpen] = useState(false);
+
+  // Mandatory Authentication Wall: Option A (Admin) & Option B (Cashier) with Gmail OTP
+  if (!isAuthenticated) {
+    return <LoginPortal />;
+  }
 
   return (
     <div
@@ -125,8 +130,6 @@ const AppContent: React.FC = () => {
         >
           {currentUser.role === 'general_manager' ? (
             <AdminDashboard />
-          ) : currentUser.role === 'store_manager' ? (
-            <StoreManagerDashboard />
           ) : (
             <CashierPOS />
           )}

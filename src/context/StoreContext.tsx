@@ -59,6 +59,9 @@ interface RegisterSaleParams {
 interface StoreContextType {
   // Current user & authentication
   currentUser: User;
+  isAuthenticated: boolean;
+  loginUser: (user: User) => void;
+  logout: () => void;
   switchUser: (userId: string) => void;
   users: User[];
   addUser: (userData: Omit<User, 'id' | 'lastLogin'>) => void;
@@ -76,7 +79,8 @@ interface StoreContextType {
   unlockScreen: (enteredPin: string) => boolean;
   twoFactorRequired: boolean;
   setTwoFactorRequired: (val: boolean) => void;
-  sendTwoFactorCode: (email: string) => Promise<{ success: boolean; code?: string; message?: string }>;
+  sendTwoFactorCode: (email: string, purpose?: string) => Promise<{ success: boolean; maskedEmail?: string; message?: string; error?: string }>;
+  verifyTwoFactorCode: (email: string, code: string) => Promise<{ success: boolean; message?: string; error?: string }>;
 
   // Stores
   stores: Store[];
@@ -227,7 +231,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return INITIAL_USERS;
   });
 
+  // Authentication status
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    return sessionStorage.getItem(`${STORAGE_KEY}_auth`) === 'true';
+  });
+
   const [currentUser, setCurrentUser] = useState<User>(() => {
+    const savedUserId = sessionStorage.getItem(`${STORAGE_KEY}_auth_user_id`);
+    if (savedUserId) {
+      const found = users.find((u) => u.id === savedUserId);
+      if (found) return found;
+    }
     return INITIAL_USERS[0]; // Kelsson Moisés (Administrador Geral)
   });
 
@@ -535,7 +549,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       addAuditLog(
         'ALTERAR_MODELO_CAIXA',
         'Modelos de Caixa',
-        `Operador ${currentUser.name} (${currentUser.role === 'general_manager' ? 'Administrador Geral' : currentUser.role === 'store_manager' ? 'Gerente' : 'Operador Caixa'}) selecionou o modelo: ${model}`,
+        `Operador ${currentUser.name} (${currentUser.role === 'general_manager' ? 'Administrador Geral' : 'Operador Caixa'}) selecionou o modelo: ${model}`,
         'normal',
         currentCashierStoreId
       );
@@ -617,23 +631,70 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return false;
   };
 
-  // 2FA Code Dispatch
-  const sendTwoFactorCode = async (email: string) => {
+  // User login via 2FA/Password
+  const loginUser = useCallback(
+    (user: User) => {
+      setCurrentUser(user);
+      setIsAuthenticated(true);
+      sessionStorage.setItem(`${STORAGE_KEY}_auth`, 'true');
+      sessionStorage.setItem(`${STORAGE_KEY}_auth_user_id`, user.id);
+      if (user.role === 'cashier' && user.assignedStoreId && user.assignedStoreId !== 'ALL') {
+        setCurrentCashierStoreId(user.assignedStoreId);
+      }
+      addAuditLog(
+        'LOGIN_SUCESSO',
+        'Autenticação',
+        `Sessão iniciada com sucesso por ${user.name} (${user.role === 'general_manager' ? 'Administrador Geral' : 'Vendedor/Caixa'}) via Gmail OTP`,
+        'normal',
+        user.assignedStoreId,
+        user.assignedStoreName
+      );
+      sound.success();
+    },
+    [addAuditLog]
+  );
+
+  // User logout
+  const logout = useCallback(() => {
+    setIsAuthenticated(false);
+    sessionStorage.removeItem(`${STORAGE_KEY}_auth`);
+    sessionStorage.removeItem(`${STORAGE_KEY}_auth_user_id`);
+    addAuditLog('LOGOUT', 'Autenticação', `Sessão encerrada pelo utilizador ${currentUser.name}`, 'normal');
+    sound.click();
+  }, [currentUser.name, addAuditLog]);
+
+  // 2FA Code Dispatch (CRITICAL: NEVER exposes code on screen or public responses)
+  const sendTwoFactorCode = async (email: string, purpose?: string) => {
     try {
       const res = await fetch('/api/security/send-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, purpose: 'Autenticação de Segurança 2FA' }),
+        body: JSON.stringify({ email, purpose: purpose || 'Autenticação de Segurança PDV-MZ' }),
       });
       const data = await res.json();
       return data;
     } catch {
-      const fallbackCode = Math.floor(100000 + Math.random() * 900000).toString();
       return {
-        success: true,
-        email,
-        code: fallbackCode,
-        message: `Código de verificação 2FA gerado (${fallbackCode}).`,
+        success: false,
+        error: 'Falha de comunicação com o servidor de envio de código.',
+      };
+    }
+  };
+
+  // 2FA Code Verification
+  const verifyTwoFactorCode = async (email: string, code: string) => {
+    try {
+      const res = await fetch('/api/security/verify-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code }),
+      });
+      const data = await res.json();
+      return data;
+    } catch {
+      return {
+        success: false,
+        error: 'Falha de conexão ao validar o código.',
       };
     }
   };
@@ -1562,6 +1623,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     <StoreContext.Provider
       value={{
         currentUser,
+        isAuthenticated,
+        loginUser,
+        logout,
         switchUser,
         users,
         addUser,
@@ -1578,6 +1642,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         twoFactorRequired,
         setTwoFactorRequired,
         sendTwoFactorCode,
+        verifyTwoFactorCode,
         stores,
         selectedAdminStoreId,
         setSelectedAdminStoreId,

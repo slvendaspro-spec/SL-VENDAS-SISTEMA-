@@ -968,31 +968,63 @@ export const SavedReportsFolder: React.FC = () => {
               <X className="w-4 h-4" />
             </button>
 
-            {/* Receipt Content */}
-            <div className="receipt-content font-mono text-center space-y-2">
-              <div className="border-b border-slate-300 pb-2">
-                <span className="text-[9px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 inline-block mb-1">
-                  HISTÓRICO DE VENDA ARQUIVADA
-                </span>
-                <h4 className="font-black text-sm uppercase tracking-wider text-black">
-                  TALÃO DE VENDA
-                </h4>
-                <p className="font-bold text-slate-800 text-xs">{selectedHistoricalSale.storeName}</p>
-                <p className="text-[10px] text-slate-500">
-                  Data: {new Date(selectedHistoricalSale.timestamp).toLocaleDateString('pt-MZ')}{' '}
-                  {new Date(selectedHistoricalSale.timestamp).toLocaleTimeString('pt-MZ', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </p>
-                <p className="text-[10px] text-slate-500">Operador: {selectedHistoricalSale.cashierName}</p>
-                <p className="text-[10px] text-slate-700 font-semibold">
-                  Cliente: {selectedHistoricalSale.customerName || 'Cliente Balcão'}
-                </p>
-                <p className="text-[10px] text-emerald-700 font-bold font-mono">
-                  Nº: {selectedHistoricalSale.saleNumber}
-                </p>
-              </div>
+            {/* Receipt Content with Store Logo and Full Header */}
+            {(() => {
+              const histStore = stores.find((s) => s.id === selectedHistoricalSale.storeId) || stores[0];
+              return (
+                <div className="receipt-content font-mono text-center space-y-2">
+                  <div className="border-b border-slate-300 pb-2">
+                    <span className="text-[9px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 inline-block mb-1.5">
+                      HISTÓRICO DE VENDA ARQUIVADA
+                    </span>
+
+                    {/* Store Logo */}
+                    {histStore?.logoUrl ? (
+                      <div className="flex justify-center mb-1.5">
+                        <img
+                          src={histStore.logoUrl}
+                          alt={histStore.name}
+                          className="w-14 h-14 object-contain rounded-xl border border-slate-200 shadow-sm"
+                        />
+                      </div>
+                    ) : (
+                      <div className="w-12 h-12 mx-auto mb-1.5 rounded-xl bg-slate-900 text-white font-black text-sm flex items-center justify-center border border-slate-700 shadow-sm">
+                        {histStore?.name?.substring(0, 2).toUpperCase() || 'SL'}
+                      </div>
+                    )}
+
+                    {/* Store Name in Bold Uppercase */}
+                    <h3 className="font-black text-sm sm:text-base uppercase tracking-tight text-slate-950 leading-tight">
+                      {histStore?.name || selectedHistoricalSale.storeName}
+                    </h3>
+
+                    {/* Fiscal Information */}
+                    <div className="text-[10px] text-slate-600 mt-1 space-y-0.5">
+                      <p className="font-bold text-slate-800">NUIT: {histStore?.nuit || '400192837'}</p>
+                      <p>{histStore?.address || 'Av. 24 de Julho'}, {histStore?.city || 'Maputo'}</p>
+                      <p>Tel: {histStore?.phone || '+258 84 000 0000'}</p>
+                    </div>
+
+                    <div className="mt-2 pt-2 border-t border-dashed border-slate-300">
+                      <h4 className="font-black text-xs sm:text-sm uppercase tracking-wider text-black">
+                        FACTURA / TALÃO DE VENDA (VD)
+                      </h4>
+                      <p className="font-mono font-bold text-[11px] text-emerald-800">
+                        Venda Nº: {selectedHistoricalSale.saleNumber}
+                      </p>
+                      <p className="text-[10px] text-slate-500">
+                        Data: {new Date(selectedHistoricalSale.timestamp).toLocaleDateString('pt-MZ')}{' '}
+                        {new Date(selectedHistoricalSale.timestamp).toLocaleTimeString('pt-MZ', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </p>
+                      <p className="text-[10px] text-slate-500">Operador: {selectedHistoricalSale.cashierName}</p>
+                      <p className="text-[10px] text-slate-700 font-semibold">
+                        Cliente: {selectedHistoricalSale.customerName || 'Cliente Balcão'}
+                      </p>
+                    </div>
+                  </div>
 
               {/* Items List */}
               <div className="text-left py-1 space-y-1">
@@ -1047,6 +1079,8 @@ export const SavedReportsFolder: React.FC = () => {
                 <p className="text-[9px] text-slate-500 mt-0.5">Comprovativo Arquivado no Sistema</p>
               </div>
             </div>
+          );
+        })()}
 
             <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
               <button

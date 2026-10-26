@@ -152,7 +152,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
         password,
         phone,
         identificationNumber,
-        avatarUrl: avatarUrl || `https://images.unsplash.com/photo-${role === 'store_manager' ? '1507003211169-0a1dd7228f2d' : '1534528741775-53994a69daeb'}?w=200&auto=format&fit=crop&q=80`,
+        avatarUrl: avatarUrl || `https://images.unsplash.com/photo-${role === 'general_manager' ? '1507003211169-0a1dd7228f2d' : '1534528741775-53994a69daeb'}?w=200&auto=format&fit=crop&q=80`,
         isActive: true,
         avatarColor: randomColor,
         permissions,
@@ -233,29 +233,39 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
             </div>
           </div>
 
-          {/* Role Selector: Gerente vs Caixa */}
+          {/* Role Selector: Administrador Geral vs Vendedor / Caixa */}
           <div>
             <label className="block text-slate-400 mb-1.5 font-bold uppercase text-[10px]">
-              Função do Usuário no Sistema:
+              Função do Utilizador no Sistema:
             </label>
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => {
-                  setRole('store_manager');
-                  setPermissions((prev) => ({ ...prev, canViewReports: true, canAdjustStock: false }));
+                  setRole('general_manager');
+                  setAssignedStoreId('ALL');
+                  setPermissions({
+                    canChangePrices: true,
+                    canApplyDiscountsOverLimit: true,
+                    canCancelSales: true,
+                    canViewReports: true,
+                    canManageProducts: true,
+                    canManageUsers: true,
+                    canManageStores: true,
+                    canAdjustStock: true,
+                  });
                 }}
                 className={`p-3 rounded-2xl border text-left flex items-start gap-2.5 transition-all ${
-                  role === 'store_manager'
+                  role === 'general_manager'
                     ? 'bg-blue-950/80 border-blue-500 text-white shadow-lg'
                     : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
                 }`}
               >
                 <Shield className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
                 <div>
-                  <span className="font-bold block text-xs">Gerente de Loja</span>
+                  <span className="font-bold block text-xs">Administrador Geral</span>
                   <span className="text-[10px] text-slate-400 leading-tight">
-                    Acesso exclusivo à sua filial. Consulta de estoque em tempo real (apenas leitura).
+                    Gestão central de todas as lojas, produtos, utilizadores e relatórios executivos.
                   </span>
                 </div>
               </button>
@@ -271,9 +281,9 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
               >
                 <StoreIcon className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
                 <div>
-                  <span className="font-bold block text-xs">Operador de Caixa</span>
+                  <span className="font-bold block text-xs">Vendedor / Caixa</span>
                   <span className="text-[10px] text-slate-400 leading-tight">
-                    Acesso ao terminal PDV da loja atribuída. Registra vendas, pagamentos e sangrias.
+                    Acesso exclusivo ao terminal PDV da sua filial autorizada.
                   </span>
                 </div>
               </button>

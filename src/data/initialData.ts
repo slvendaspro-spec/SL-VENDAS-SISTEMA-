@@ -57,10 +57,11 @@ export const INITIAL_STORES: Store[] = [
     status: 'active',
     isOnline: true,
     lastSync: new Date().toISOString(),
-    cashierIds: [],
-    managerName: 'Kelsson Moisés (Administrador Geral)',
+    cashierIds: ['user_caixa_1'],
+    responsibleName: 'Kelsson Moisés (Administrador Geral)',
     dailySalesTarget: 50000, // 50.000,00 MZN diários
     imageUrl: 'https://images.unsplash.com/photo-1578916171728-46686eac8d58?w=600&auto=format&fit=crop&q=80',
+    logoUrl: 'https://images.unsplash.com/photo-1534452203293-494d7ddbf7e0?w=200&auto=format&fit=crop&q=80',
     createdAt: '2026-01-10T08:00:00Z',
   },
   {
@@ -75,9 +76,10 @@ export const INITIAL_STORES: Store[] = [
     isOnline: true,
     lastSync: new Date(Date.now() - 3 * 60 * 1000).toISOString(),
     cashierIds: [],
-    managerName: 'Administração Geral',
+    responsibleName: 'Administração Geral',
     dailySalesTarget: 35000, // 35.000,00 MZN diários
     imageUrl: 'https://images.unsplash.com/photo-1604719312566-8912e9227c6a?w=600&auto=format&fit=crop&q=80',
+    logoUrl: 'https://images.unsplash.com/photo-1534452203293-494d7ddbf7e0?w=200&auto=format&fit=crop&q=80',
     createdAt: '2026-02-15T09:30:00Z',
   },
   {
@@ -92,9 +94,10 @@ export const INITIAL_STORES: Store[] = [
     isOnline: true,
     lastSync: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
     cashierIds: [],
-    managerName: 'Administração Geral',
+    responsibleName: 'Administração Geral',
     dailySalesTarget: 25000, // 25.000,00 MZN diários
     imageUrl: 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=600&auto=format&fit=crop&q=80',
+    logoUrl: 'https://images.unsplash.com/photo-1534452203293-494d7ddbf7e0?w=200&auto=format&fit=crop&q=80',
     createdAt: '2026-04-01T10:00:00Z',
   },
   {
@@ -109,14 +112,15 @@ export const INITIAL_STORES: Store[] = [
     isOnline: false,
     lastSync: new Date(Date.now() - 48 * 3600 * 1000).toISOString(),
     cashierIds: [],
-    managerName: 'Administração Geral',
+    responsibleName: 'Administração Geral',
     dailySalesTarget: 20000, // 20.000,00 MZN diários
     imageUrl: 'https://images.unsplash.com/photo-1534723452862-4c874018d66d?w=600&auto=format&fit=crop&q=80',
+    logoUrl: 'https://images.unsplash.com/photo-1534452203293-494d7ddbf7e0?w=200&auto=format&fit=crop&q=80',
     createdAt: '2026-06-20T11:00:00Z',
   },
 ];
 
-// Inicia unicamente com a conta do Administrador Geral!
+// Contas oficiais: OPÇÃO A (Administrador Geral) e OPÇÃO B (Vendedor / Caixa)
 export const INITIAL_USERS: User[] = [
   {
     id: 'user_1',
@@ -142,6 +146,32 @@ export const INITIAL_USERS: User[] = [
       canManageUsers: true,
       canManageStores: true,
       canAdjustStock: true,
+    },
+  },
+  {
+    id: 'user_caixa_1',
+    name: 'Amélia Cossa (Vendedora / Caixa)',
+    email: 'amelia.caixa@gmail.com',
+    role: 'cashier',
+    assignedStoreId: 'store_1',
+    assignedStoreName: 'Loja Maputo Central',
+    pin: '1234',
+    password: 'caixa123',
+    phone: '+258 84 100 2000',
+    identificationNumber: '110998877665A',
+    avatarUrl: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200&auto=format&fit=crop&q=80',
+    isActive: true,
+    avatarColor: 'bg-emerald-600',
+    lastLogin: new Date().toISOString(),
+    permissions: {
+      canChangePrices: false,
+      canApplyDiscountsOverLimit: false,
+      canCancelSales: false,
+      canViewReports: false,
+      canManageProducts: false,
+      canManageUsers: false,
+      canManageStores: false,
+      canAdjustStock: false,
     },
   },
 ];
