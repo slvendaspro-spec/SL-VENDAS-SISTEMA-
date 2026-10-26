@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import {
+  Company,
   Store,
   User,
   Product,
@@ -24,6 +25,7 @@ import {
   StoreRankingItem,
 } from '../types';
 import {
+  INITIAL_COMPANIES,
   INITIAL_STORES,
   INITIAL_USERS,
   INITIAL_PRODUCTS,
@@ -57,11 +59,26 @@ interface RegisterSaleParams {
 }
 
 interface StoreContextType {
+  // Multiempresa / Multi-Tenant SaaS
+  companies: Company[];
+  currentCompany: Company;
+  selectedCompanyId: string;
+  setSelectedCompanyId: (companyId: string) => void;
+  switchCompany: (companyId: string) => void;
+  updateCompany: (companyId: string, data: Partial<Company>) => void;
+  registerCompanyAndOwner: (
+    companyData: { name: string; city?: string; currency?: string; nuit?: string; logoUrl?: string },
+    ownerData: { name: string; email: string; phone: string; password: string }
+  ) => { company: Company; owner: User };
+
   // Current user & authentication
   currentUser: User;
+  isAuthenticated: boolean;
+  loginUser: (user: User) => void;
+  logout: () => void;
   switchUser: (userId: string) => void;
   users: User[];
-  addUser: (userData: Omit<User, 'id' | 'lastLogin'>) => void;
+  addUser: (userData: Omit<User, 'id' | 'lastLogin'>) => User;
   updateUser: (userId: string, data: Partial<User>) => void;
   deleteUser: (userId: string) => void;
   resetUserPin: (userId: string, defaultPin?: string) => void;
@@ -76,7 +93,8 @@ interface StoreContextType {
   unlockScreen: (enteredPin: string) => boolean;
   twoFactorRequired: boolean;
   setTwoFactorRequired: (val: boolean) => void;
-  sendTwoFactorCode: (email: string) => Promise<{ success: boolean; code?: string; message?: string }>;
+  sendTwoFactorCode: (email: string, purpose?: string) => Promise<{ success: boolean; maskedEmail?: string; message?: string; error?: string }>;
+  verifyTwoFactorCode: (email: string, code: string) => Promise<{ success: boolean; message?: string; error?: string }>;
 
   // Stores
   stores: Store[];
@@ -209,13 +227,25 @@ const StoreContext = createContext<StoreContextType | undefined>(undefined);
 const STORAGE_KEY = 'sl_vendas_data_v4';
 
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Load companies (Multiempresa SaaS)
+  const [companies, setCompanies] = useState<Company[]>(() => {
+    const saved = localStorage.getItem(`${STORAGE_KEY}_companies`);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {}
+    }
+    return INITIAL_COMPANIES;
+  });
+
   // Load stores
   const [stores, setStores] = useState<Store[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY}_stores`);
     return saved ? JSON.parse(saved) : INITIAL_STORES;
   });
 
-  // Load users (starts with ONLY the general administrator account)
+  // Load users (super_admin, company owners, cashiers)
   const [users, setUsers] = useState<User[]>(() => {
     const saved = localStorage.getItem(`${STORAGE_KEY}_users`);
     if (saved) {
@@ -227,9 +257,54 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return INITIAL_USERS;
   });
 
-  const [currentUser, setCurrentUser] = useState<User>(() => {
-    return INITIAL_USERS[0]; // Kelsson Moisés (Administrador Geral)
+  // Authentication status
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    return sessionStorage.getItem(`${STORAGE_KEY}_auth`) === 'true';
   });
+
+  const [currentUser, setCurrentUser] = useState<User>(() => {
+    const savedUserId = sessionStorage.getItem(`${STORAGE_KEY}_auth_user_id`);
+    if (savedUserId) {
+      const found = users.find((u) => u.id === savedUserId);
+      if (found) return found;
+    }
+    return INITIAL_USERS[0]; // Kelsson Moisés (Super Administrador)
+  });
+
+  // Active Company Selection
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>(() => {
+    return currentUser.companyId || 'empresa_maputo_01';
+  });
+
+  // Keep selected company in sync with logged-in user
+  useEffect(() => {
+    if (currentUser.companyId) {
+      setSelectedCompanyId(currentUser.companyId);
+    }
+  }, [currentUser.id, currentUser.companyId]);
+
+  // Current Company object
+  const currentCompany = useMemo(() => {
+    const targetId = currentUser.role === 'super_admin'
+      ? (selectedCompanyId === 'ALL' ? (companies[0]?.id || 'empresa_maputo_01') : selectedCompanyId)
+      : (currentUser.companyId || companies[0]?.id || 'empresa_maputo_01');
+    return companies.find((c) => c.id === targetId) || companies[0] || INITIAL_COMPANIES[0];
+  }, [companies, currentUser.role, currentUser.companyId, selectedCompanyId]);
+
+  const switchCompany = useCallback((companyId: string) => {
+    setSelectedCompanyId(companyId);
+  }, []);
+
+  const updateCompany = useCallback((companyId: string, data: Partial<Company>) => {
+    setCompanies((prev) =>
+      prev.map((c) => (c.id === companyId ? { ...c, ...data } : c))
+    );
+  }, []);
+
+  // Save companies
+  useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY}_companies`, JSON.stringify(companies));
+  }, [companies]);
 
   // Current store operated by cashier (can be switched right from the UI!)
   const [currentCashierStoreId, setCurrentCashierStoreId] = useState<string>(() => {
@@ -535,7 +610,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       addAuditLog(
         'ALTERAR_MODELO_CAIXA',
         'Modelos de Caixa',
-        `Operador ${currentUser.name} (${currentUser.role === 'general_manager' ? 'Administrador Geral' : currentUser.role === 'store_manager' ? 'Gerente' : 'Operador Caixa'}) selecionou o modelo: ${model}`,
+        `Operador ${currentUser.name} (${currentUser.role === 'general_manager' ? 'Administrador Geral' : 'Operador Caixa'}) selecionou o modelo: ${model}`,
         'normal',
         currentCashierStoreId
       );
@@ -617,31 +692,200 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return false;
   };
 
-  // 2FA Code Dispatch
-  const sendTwoFactorCode = async (email: string) => {
+  // User login via 2FA/Password
+  const loginUser = useCallback(
+    (user: User) => {
+      setCurrentUser(user);
+      setIsAuthenticated(true);
+      sessionStorage.setItem(`${STORAGE_KEY}_auth`, 'true');
+      sessionStorage.setItem(`${STORAGE_KEY}_auth_user_id`, user.id);
+      if (user.role === 'cashier' && user.assignedStoreId && user.assignedStoreId !== 'ALL') {
+        setCurrentCashierStoreId(user.assignedStoreId);
+      }
+      addAuditLog(
+        'LOGIN_SUCESSO',
+        'Autenticação',
+        `Sessão iniciada com sucesso por ${user.name} (${user.role === 'general_manager' ? 'Administrador Geral' : 'Vendedor/Caixa'}) via Gmail OTP`,
+        'normal',
+        user.assignedStoreId,
+        user.assignedStoreName
+      );
+      sound.success();
+    },
+    [addAuditLog]
+  );
+
+  // Registro Público e Criação Automática do Espaço Multiempresa
+  const registerCompanyAndOwner = useCallback(
+    (
+      companyData: { name: string; city?: string; currency?: string; nuit?: string; logoUrl?: string },
+      ownerData: { name: string; email: string; phone: string; password: string }
+    ) => {
+      const timestamp = Date.now();
+      const newCompanyId = `empresa_${timestamp}`;
+      const newStoreId = `store_${timestamp}`;
+      const newUserId = `user_${timestamp}`;
+      const companyNuit = companyData.nuit || `${Math.floor(100000000 + Math.random() * 900000000)}`;
+
+      const newCompany: Company = {
+        id: newCompanyId,
+        name: companyData.name,
+        nuit: companyNuit,
+        ownerName: ownerData.name,
+        ownerEmail: ownerData.email,
+        ownerPhone: ownerData.phone,
+        currency: companyData.currency || 'MZN',
+        city: companyData.city || 'Maputo',
+        address: `${companyData.city || 'Maputo'}, Moçambique`,
+        logoUrl: companyData.logoUrl || 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=200&auto=format&fit=crop&q=80',
+        plan: 'profissional',
+        status: 'active',
+        createdAt: new Date().toISOString(),
+      };
+
+      const newStore: Store = {
+        id: newStoreId,
+        companyId: newCompanyId,
+        name: `${companyData.name} - Loja Principal`,
+        code: 'LOJA-01',
+        address: `${companyData.city || 'Maputo'}, Moçambique`,
+        city: companyData.city || 'Maputo',
+        phone: ownerData.phone,
+        nuit: companyNuit,
+        status: 'active',
+        isOnline: true,
+        lastSync: new Date().toISOString(),
+        cashierIds: [newUserId],
+        responsibleName: ownerData.name,
+        dailySalesTarget: 35000,
+        createdAt: new Date().toISOString(),
+      };
+
+      const newOwner: User = {
+        id: newUserId,
+        companyId: newCompanyId,
+        name: ownerData.name,
+        email: ownerData.email,
+        role: 'company_admin',
+        assignedStoreId: 'ALL',
+        assignedStoreName: newStore.name,
+        pin: '1234',
+        password: ownerData.password,
+        phone: ownerData.phone,
+        identificationNumber: '110' + Math.floor(10000000 + Math.random() * 90000000) + 'M',
+        isActive: true,
+        avatarColor: 'bg-emerald-600',
+        lastLogin: new Date().toISOString(),
+        permissions: {
+          canChangePrices: true,
+          canApplyDiscountsOverLimit: true,
+          canCancelSales: true,
+          canViewReports: true,
+          canManageProducts: true,
+          canManageUsers: true,
+          canManageStores: true,
+          canAdjustStock: true,
+        },
+      };
+
+      const starterProducts: Product[] = [
+        {
+          id: `prod_${timestamp}_1`,
+          companyId: newCompanyId,
+          name: 'Produto Inicial 01 (Exemplo)',
+          code: 'EX-001',
+          barcode: `${timestamp}`.slice(-13),
+          category: 'Mercearia & Geral',
+          costPrice: 50,
+          salePrice: 100,
+          stockQuantity: 50,
+          stockByStore: { [newStoreId]: 50 },
+          minStock: 10,
+          unit: 'Unid',
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: `prod_${timestamp}_2`,
+          companyId: newCompanyId,
+          name: 'Produto Inicial 02 (Exemplo)',
+          code: 'EX-002',
+          barcode: `${timestamp + 1}`.slice(-13),
+          category: 'Mercearia & Geral',
+          costPrice: 150,
+          salePrice: 250,
+          stockQuantity: 30,
+          stockByStore: { [newStoreId]: 30 },
+          minStock: 5,
+          unit: 'Unid',
+          createdAt: new Date().toISOString(),
+        },
+      ];
+
+      setCompanies((prev) => [newCompany, ...prev]);
+      setStores((prev) => [newStore, ...prev]);
+      setUsers((prev) => [newOwner, ...prev]);
+      setProducts((prev) => [...starterProducts, ...prev]);
+
+      loginUser(newOwner);
+      setSelectedCompanyId(newCompanyId);
+      setCurrentCashierStoreId(newStoreId);
+
+      return { company: newCompany, owner: newOwner };
+    },
+    [loginUser]
+  );
+
+  // User logout
+  const logout = useCallback(() => {
+    setIsAuthenticated(false);
+    sessionStorage.removeItem(`${STORAGE_KEY}_auth`);
+    sessionStorage.removeItem(`${STORAGE_KEY}_auth_user_id`);
+    addAuditLog('LOGOUT', 'Autenticação', `Sessão encerrada pelo utilizador ${currentUser.name}`, 'normal');
+    sound.click();
+  }, [currentUser.name, addAuditLog]);
+
+  // 2FA Code Dispatch (CRITICAL: NEVER exposes code on screen or public responses)
+  const sendTwoFactorCode = async (email: string, purpose?: string) => {
     try {
       const res = await fetch('/api/security/send-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, purpose: 'Autenticação de Segurança 2FA' }),
+        body: JSON.stringify({ email, purpose: purpose || 'Autenticação de Segurança PDV-MZ' }),
       });
       const data = await res.json();
       return data;
     } catch {
-      const fallbackCode = Math.floor(100000 + Math.random() * 900000).toString();
       return {
-        success: true,
-        email,
-        code: fallbackCode,
-        message: `Código de verificação 2FA gerado (${fallbackCode}).`,
+        success: false,
+        error: 'Falha de comunicação com o servidor de envio de código.',
+      };
+    }
+  };
+
+  // 2FA Code Verification
+  const verifyTwoFactorCode = async (email: string, code: string) => {
+    try {
+      const res = await fetch('/api/security/verify-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code }),
+      });
+      const data = await res.json();
+      return data;
+    } catch {
+      return {
+        success: false,
+        error: 'Falha de conexão ao validar o código.',
       };
     }
   };
 
   // Customer Management & Loyalty Discount
   const addCustomer = (custData: Omit<Customer, 'id' | 'createdAt'>) => {
+    const activeCompanyId = custData.companyId || (currentUser.role === 'super_admin' ? (selectedCompanyId === 'ALL' ? companies[0]?.id : selectedCompanyId) : currentUser.companyId) || 'empresa_maputo_01';
     const newCust: Customer = {
       ...custData,
+      companyId: activeCompanyId,
       id: `cust_${Date.now()}`,
       createdAt: new Date().toISOString(),
     };
@@ -668,14 +912,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   // User Management
-  const addUser = (userData: Omit<User, 'id' | 'lastLogin'>) => {
+  const addUser = (userData: Omit<User, 'id' | 'lastLogin'>): User => {
+    const activeCompanyId = userData.companyId || (currentUser.role === 'super_admin' ? (selectedCompanyId === 'ALL' ? companies[0]?.id : selectedCompanyId) : currentUser.companyId) || 'empresa_maputo_01';
     const newUser: User = {
       ...userData,
+      companyId: activeCompanyId,
       id: `user_${Date.now()}`,
       lastLogin: new Date().toISOString(),
     };
     setUsers((prev) => [...prev, newUser]);
     addAuditLog('CRIAR_USUARIO', `Usuário ${newUser.name}`, `Cadastrado para ${newUser.assignedStoreName}`, 'normal');
+    return newUser;
   };
 
   const updateUser = (userId: string, data: Partial<User>) => {
@@ -689,7 +936,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const deleteUser = (userId: string) => {
     const target = users.find((u) => u.id === userId);
     if (!target) return;
-    if (target.id === 'user_1' || target.email === 'kelssonmoises@gmail.com') {
+    if (target.id === 'user_1' || target.id === 'user_super' || target.email === 'kelssonmoises@gmail.com') {
       alert('Não é permitido eliminar a conta principal do Administrador Geral!');
       return;
     }
@@ -718,8 +965,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Fecho Diário de Caixa Registrado
   const registerShiftClosure = useCallback(
     (closureData: Omit<ShiftClosure, 'id' | 'closureNumber' | 'closedAt' | 'isSynced'>): ShiftClosure => {
+      const activeCompanyId = (closureData as any).companyId || (currentUser.role === 'super_admin' ? (selectedCompanyId === 'ALL' ? companies[0]?.id : selectedCompanyId) : currentUser.companyId) || 'empresa_maputo_01';
       const newClosure: ShiftClosure = {
         ...closureData,
+        companyId: activeCompanyId,
         id: `fecho_${Date.now()}`,
         closureNumber: `FC-${new Date().getFullYear()}-${String(shiftClosures.length + 1).padStart(4, '0')}`,
         closedAt: new Date().toISOString(),
@@ -749,13 +998,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       sound.success();
       return newClosure;
     },
-    [shiftClosures.length, isOnline, addAuditLog, addNotification]
+    [shiftClosures.length, isOnline, addAuditLog, addNotification, currentUser.role, currentUser.companyId, selectedCompanyId, companies]
   );
 
   // Store Management
   const addStore = (storeData: Omit<Store, 'id' | 'createdAt' | 'lastSync'>) => {
+    const activeCompanyId = storeData.companyId || (currentUser.role === 'super_admin' ? (selectedCompanyId === 'ALL' ? companies[0]?.id : selectedCompanyId) : currentUser.companyId) || 'empresa_maputo_01';
     const newStore: Store = {
       ...storeData,
+      companyId: activeCompanyId,
       id: `store_${Date.now()}`,
       createdAt: new Date().toISOString(),
       lastSync: new Date().toISOString(),
@@ -791,8 +1042,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Products & Stock
   const addProduct = (productData: Omit<Product, 'id' | 'createdAt'>) => {
+    const activeCompanyId = (productData as any).companyId || (currentUser.role === 'super_admin' ? (selectedCompanyId === 'ALL' ? companies[0]?.id : selectedCompanyId) : currentUser.companyId) || 'empresa_maputo_01';
     const newProd: Product = {
       ...productData,
+      companyId: activeCompanyId,
       id: `prod_${Date.now()}`,
       createdAt: new Date().toISOString(),
     };
@@ -1562,6 +1815,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     <StoreContext.Provider
       value={{
         currentUser,
+        isAuthenticated,
+        loginUser,
+        logout,
         switchUser,
         users,
         addUser,
@@ -1578,6 +1834,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         twoFactorRequired,
         setTwoFactorRequired,
         sendTwoFactorCode,
+        verifyTwoFactorCode,
         stores,
         selectedAdminStoreId,
         setSelectedAdminStoreId,

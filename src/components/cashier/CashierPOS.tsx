@@ -2027,22 +2027,56 @@ export const CashierPOS: React.FC = () => {
               <X className="w-4 h-4" />
             </button>
 
-            {/* Formatted Invoice / Receipt */}
-            <div className="receipt-content font-mono text-center space-y-2">
-              <div className="border-b border-slate-300 pb-2">
-                <h4 className="font-black text-sm uppercase tracking-wider text-black">
-                  TALÃO DE VENDA
-                </h4>
-                <p className="font-bold text-slate-800 text-xs">{completedSale.storeName}</p>
-                <p className="text-[10px] text-slate-500">
-                  Data: {new Date(completedSale.timestamp).toLocaleDateString('pt-MZ')}{' '}
-                  {new Date(completedSale.timestamp).toLocaleTimeString('pt-MZ', { hour: '2-digit', minute: '2-digit' })}
-                </p>
-                <p className="text-[10px] text-slate-500">Operador: {completedSale.cashierName}</p>
-                {completedSale.customerName && completedSale.customerName !== 'Cliente Balcão' && (
-                  <p className="text-[10px] text-slate-700 font-semibold">Cliente: {completedSale.customerName}</p>
-                )}
-              </div>
+            {/* Formatted Invoice / Receipt with Store Logo and Full Header */}
+            {(() => {
+              const saleStore = stores.find((s) => s.id === completedSale.storeId) || currentStore;
+              return (
+                <div className="receipt-content font-mono text-center space-y-2">
+                  <div className="border-b border-slate-300 pb-2">
+                    {/* Store Logo or Emblem */}
+                    {saleStore.logoUrl ? (
+                      <div className="flex justify-center mb-1.5">
+                        <img
+                          src={saleStore.logoUrl}
+                          alt={saleStore.name}
+                          className="w-14 h-14 object-contain rounded-xl border border-slate-200 shadow-sm"
+                        />
+                      </div>
+                    ) : (
+                      <div className="w-12 h-12 mx-auto mb-1.5 rounded-xl bg-slate-900 text-white font-black text-sm flex items-center justify-center border border-slate-700 shadow-sm">
+                        {saleStore.name.substring(0, 2).toUpperCase()}
+                      </div>
+                    )}
+
+                    {/* Prominent Store Name in Bold Uppercase */}
+                    <h3 className="font-black text-sm sm:text-base uppercase tracking-tight text-slate-950 leading-tight">
+                      {saleStore.name}
+                    </h3>
+
+                    {/* Fiscal Information & Address */}
+                    <div className="text-[10px] text-slate-600 mt-1 space-y-0.5">
+                      <p className="font-bold text-slate-800">NUIT: {saleStore.nuit || '400192837'}</p>
+                      <p>{saleStore.address}, {saleStore.city}</p>
+                      <p>Tel: {saleStore.phone || '+258 84 000 0000'}</p>
+                    </div>
+
+                    <div className="mt-2 pt-2 border-t border-dashed border-slate-300">
+                      <h4 className="font-black text-xs sm:text-sm uppercase tracking-wider text-black">
+                        FACTURA / TALÃO DE VENDA (VD)
+                      </h4>
+                      <p className="font-mono font-bold text-[11px] text-emerald-800">
+                        Venda Nº: {completedSale.saleNumber}
+                      </p>
+                      <p className="text-[10px] text-slate-500">
+                        Data: {new Date(completedSale.timestamp).toLocaleDateString('pt-MZ')}{' '}
+                        {new Date(completedSale.timestamp).toLocaleTimeString('pt-MZ', { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                      <p className="text-[10px] text-slate-500">Operador: {completedSale.cashierName}</p>
+                      {completedSale.customerName && completedSale.customerName !== 'Cliente Balcão' && (
+                        <p className="text-[10px] text-slate-700 font-semibold">Cliente: {completedSale.customerName}</p>
+                      )}
+                    </div>
+                  </div>
 
               {/* Items List */}
               <div className="text-left py-1 space-y-1">
@@ -2091,6 +2125,8 @@ export const CashierPOS: React.FC = () => {
                 <p className="text-[9px] text-slate-500 mt-0.5">SL VENDAS • PDV Moçambique</p>
               </div>
             </div>
+          );
+        })()}
 
             <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
               <button
