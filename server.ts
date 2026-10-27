@@ -57,6 +57,90 @@ interface AdminOtpEntry {
 }
 const adminOtpStore = new Map<string, AdminOtpEntry>();
 
+// Utilizadores oficiais cadastrados no servidor
+const knownUsers = [
+  {
+    id: 'user_1',
+    name: 'Kelsson Moisés (Administrador Geral)',
+    email: ADMIN_OFFICIAL_EMAIL,
+    role: 'general_manager',
+    assignedStoreId: 'ALL',
+    assignedStoreName: 'Todas as Lojas (Acesso Geral)',
+    pin: '1234',
+    password: 'admin123',
+    phone: '+258 84 777 0000',
+    isActive: true,
+    permissions: {
+      canChangePrices: true,
+      canApplyDiscountsOverLimit: true,
+      canCancelSales: true,
+      canViewReports: true,
+      canManageProducts: true,
+      canManageUsers: true,
+      canManageStores: true,
+      canAdjustStock: true,
+    },
+  },
+  {
+    id: 'user_caixa_1',
+    name: 'Amélia Cossa (Vendedora / Caixa)',
+    email: 'amelia.caixa@gmail.com',
+    role: 'cashier',
+    assignedStoreId: 'store_1',
+    assignedStoreName: 'Loja Maputo Central',
+    pin: '1234',
+    password: 'caixa123',
+    phone: '+258 84 100 2000',
+    isActive: true,
+    permissions: {
+      canChangePrices: false,
+      canApplyDiscountsOverLimit: false,
+      canCancelSales: false,
+      canViewReports: false,
+      canManageProducts: false,
+      canManageUsers: false,
+      canManageStores: false,
+      canAdjustStock: false,
+    },
+  },
+  {
+    id: 'user_gerente_1',
+    name: 'Mateus Macuácua (Gerente de Loja)',
+    email: 'mateus.gerente@gmail.com',
+    role: 'store_manager',
+    assignedStoreId: 'store_2',
+    assignedStoreName: 'Loja Matola Rio',
+    pin: '5678',
+    password: 'gerente123',
+    phone: '+258 84 200 3000',
+    isActive: true,
+    permissions: {
+      canChangePrices: false,
+      canApplyDiscountsOverLimit: true,
+      canCancelSales: true,
+      canViewReports: true,
+      canManageProducts: true,
+      canManageUsers: false,
+      canManageStores: false,
+      canAdjustStock: true,
+    },
+  },
+];
+
+// Armazenamento em memória para recuperação de contas
+interface RecoveryEntry {
+  hash: string;
+  testCode?: string;
+  userId: string;
+  userEmail: string;
+  userName: string;
+  userRole: string;
+  expiresAt: number; // 5 minutos
+  attempts: number; // máx 5
+  createdAt: number;
+}
+const accountRecoveryStore = new Map<string, RecoveryEntry>();
+
 // Configuração do Transportador de Email (Resend / SMTP / Gmail / Fallback)
 function getMailTransporter() {
   if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
@@ -340,54 +424,6 @@ async function startServer() {
 
       const cleanId = identifier.trim().toLowerCase();
       const cleanPass = passwordOrPin.trim();
-
-      // Mapeamento de utilizadores autorizados no servidor
-      const knownUsers = [
-        {
-          id: 'user_caixa_1',
-          name: 'Amélia Cossa (Vendedora / Caixa)',
-          email: 'amelia.caixa@gmail.com',
-          role: 'cashier',
-          assignedStoreId: 'store_1',
-          assignedStoreName: 'Loja Maputo Central',
-          pin: '1234',
-          password: 'caixa123',
-          phone: '+258 84 100 2000',
-          isActive: true,
-          permissions: {
-            canChangePrices: false,
-            canApplyDiscountsOverLimit: false,
-            canCancelSales: false,
-            canViewReports: false,
-            canManageProducts: false,
-            canManageUsers: false,
-            canManageStores: false,
-            canAdjustStock: false,
-          },
-        },
-        {
-          id: 'user_gerente_1',
-          name: 'Mateus Macuácua (Gerente de Loja)',
-          email: 'mateus.gerente@gmail.com',
-          role: 'store_manager',
-          assignedStoreId: 'store_2',
-          assignedStoreName: 'Loja Matola Rio',
-          pin: '5678',
-          password: 'gerente123',
-          phone: '+258 84 200 3000',
-          isActive: true,
-          permissions: {
-            canChangePrices: false,
-            canApplyDiscountsOverLimit: true,
-            canCancelSales: true,
-            canViewReports: true,
-            canManageProducts: true,
-            canManageUsers: false,
-            canManageStores: false,
-            canAdjustStock: true,
-          },
-        },
-      ];
 
       // Localizar utilizador no servidor
       const found = knownUsers.find(
@@ -837,7 +873,231 @@ async function startServer() {
     return res.json({ success: true, verified: true });
   });
 
-  // ==================== 5. SINCRONIZAÇÃO E PERSISTÊNCIA CENTRAL ====================
+  // ==================== 5. RECUPERAÇÃO DE CONTA E PALAVRA-PASSE ====================
+
+  /**
+   * Solicitar código de recuperação de conta.
+   * O código de 6 dígitos é enviado para o email oficial do Administrador Geral (kelssonmoises@gmail.com).
+   */
+  app.post('/api/auth/recover-account/request', async (req, res) => {
+    try {
+      const { identifier } = req.body;
+
+      if (!identifier || typeof identifier !== 'string') {
+        return res.status(400).json({
+          success: false,
+          error: 'Identificador do utilizador (Email, Telefone ou Nome) é obrigatório.',
+        });
+      }
+
+      const cleanId = identifier.trim().toLowerCase();
+
+      // Encontrar utilizador
+      const found = knownUsers.find(
+        (u) =>
+          u.email.toLowerCase() === cleanId ||
+          u.name.toLowerCase().includes(cleanId) ||
+          u.phone.replace(/\s+/g, '') === cleanId.replace(/\s+/g, '')
+      );
+
+      if (!found) {
+        return res.status(404).json({
+          success: false,
+          error: 'Nenhuma conta encontrada com as informações fornecidas.',
+        });
+      }
+
+      // Limite de taxa: 10 segundos
+      const existing = accountRecoveryStore.get(found.email.toLowerCase());
+      if (existing && Date.now() - existing.createdAt < 10 * 1000) {
+        const wait = Math.ceil((10 * 1000 - (Date.now() - existing.createdAt)) / 1000);
+        return res.status(429).json({
+          success: false,
+          error: `Aguarde ${wait} segundos antes de solicitar nova recuperação.`,
+        });
+      }
+
+      // Gerar código aleatório de 6 dígitos
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+
+      accountRecoveryStore.set(found.email.toLowerCase(), {
+        hash: codeHash,
+        testCode: code,
+        userId: found.id,
+        userEmail: found.email,
+        userName: found.name,
+        userRole: found.role,
+        expiresAt: Date.now() + 5 * 60 * 1000,
+        attempts: 0,
+        createdAt: Date.now(),
+      });
+
+      // Enviar email com código de recuperação
+      const isGeneralManager = found.role === 'general_manager';
+      const subject = isGeneralManager
+        ? `🔑 [RECUPERAÇÃO PDV-MZ] Código de Recuperação: Administrador Geral`
+        : `🔑 [RECUPERAÇÃO PDV-MZ] Pedido de Recuperação de Senha: ${found.name}`;
+
+      const text = `PDV-MZ • RECUPERAÇÃO DE CONTA E PALAVRA-PASSE\n\nOperador: ${found.name} (${found.email})\nFunção: ${found.role === 'general_manager' ? 'Administrador Geral' : found.role === 'store_manager' ? 'Gerente' : 'Vendedor/Caixa'}\n\nCÓDIGO DE RECUPERAÇÃO DE 6 DÍGITOS: ${code}\n\nValidade: 5 minutos (utilização única).\nSe não solicitou a recuperação, contacte a segurança imediatamente.`;
+
+      const html = `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 500px; margin: 0 auto; background: #0f172a; color: #f8fafc; border-radius: 20px; padding: 32px; border: 1px solid #1e293b;">
+          <div style="text-align: center; margin-bottom: 24px;">
+            <span style="background: #991b1b; color: #fca5a5; font-size: 11px; font-weight: 800; padding: 4px 12px; border-radius: 999px; letter-spacing: 1px;">RECUPERAÇÃO DE CONTA</span>
+            <h2 style="font-size: 20px; font-weight: 900; margin: 12px 0 4px 0; color: #ffffff;">PDV-MZ • Redefinição Segura</h2>
+            <p style="font-size: 13px; color: #94a3b8; margin: 0;">Pedido de recuperação de palavra-passe e PIN</p>
+          </div>
+
+          <div style="background: #1e293b; border-radius: 14px; padding: 16px; margin-bottom: 20px; font-size: 13px;">
+            <p style="margin: 0 0 6px 0;"><strong>Conta:</strong> ${found.name}</p>
+            <p style="margin: 0 0 6px 0;"><strong>Email Registado:</strong> ${found.email}</p>
+            <p style="margin: 0;"><strong>Função:</strong> ${found.role === 'general_manager' ? 'Administrador Geral' : found.role === 'store_manager' ? 'Gerente' : 'Vendedor / Caixa'}</p>
+          </div>
+
+          <div style="background: #020617; border: 2px dashed #f59e0b; border-radius: 16px; padding: 24px; text-align: center; margin: 24px 0;">
+            <span style="font-size: 12px; color: #fcd34d; font-weight: 700; display: block; margin-bottom: 8px;">CÓDIGO DE RECUPERAÇÃO (6 DÍGITOS):</span>
+            <div style="font-family: monospace; font-size: 40px; font-weight: 900; letter-spacing: 12px; color: #fbbf24;">
+              ${code}
+            </div>
+          </div>
+
+          <div style="font-size: 12px; color: #94a3b8; line-height: 1.6; border-top: 1px solid #1e293b; padding-top: 16px;">
+            <p style="margin: 0 0 6px 0;">⏳ <strong>Validade:</strong> 5 minutos (expiração automática).</p>
+            <p style="margin: 0 0 6px 0;">🔒 <strong>Uso Único:</strong> Código invalidado automaticamente após a redefinição.</p>
+            <p style="margin: 0; color: #ef4444;">Nunca partilhe este código com terceiros.</p>
+          </div>
+        </div>
+      `;
+
+      // Envia sempre para o email oficial do Administrador Geral
+      await dispatchEmail({
+        to: ADMIN_OFFICIAL_EMAIL,
+        subject,
+        text,
+        html,
+      });
+
+      return res.json({
+        success: true,
+        userName: found.name,
+        userEmail: found.email,
+        maskedEmail: maskEmail(ADMIN_OFFICIAL_EMAIL),
+        role: found.role,
+        message: `Código de recuperação de 6 dígitos enviado para o email oficial do Administrador Geral (${maskEmail(ADMIN_OFFICIAL_EMAIL)}). Válido por 5 minutos.`,
+      });
+    } catch (err: any) {
+      console.error('Erro em recover-account/request:', err);
+      return res.status(500).json({ success: false, error: 'Erro ao processar pedido de recuperação.' });
+    }
+  });
+
+  /**
+   * Confirmar código de recuperação e definir nova palavra-passe / PIN.
+   */
+  app.post('/api/auth/recover-account/confirm', (req, res) => {
+    try {
+      const { identifier, code, newPassword, newPin } = req.body;
+
+      if (!identifier || !code || !newPassword) {
+        return res.status(400).json({
+          success: false,
+          error: 'Identificador, código de recuperação e nova palavra-passe são obrigatórios.',
+        });
+      }
+
+      const cleanId = identifier.trim().toLowerCase();
+      const cleanCode = code.toString().trim();
+      const cleanNewPass = newPassword.trim();
+
+      if (cleanNewPass.length < 4) {
+        return res.status(400).json({
+          success: false,
+          error: 'A nova palavra-passe deve ter pelo menos 4 caracteres.',
+        });
+      }
+
+      // Localizar utilizador
+      const found = knownUsers.find(
+        (u) =>
+          u.email.toLowerCase() === cleanId ||
+          u.name.toLowerCase().includes(cleanId) ||
+          u.phone.replace(/\s+/g, '') === cleanId.replace(/\s+/g, '')
+      );
+
+      if (!found) {
+        return res.status(404).json({ success: false, error: 'Utilizador não encontrado.' });
+      }
+
+      const entry = accountRecoveryStore.get(found.email.toLowerCase());
+
+      if (!entry) {
+        return res.status(400).json({
+          success: false,
+          error: 'Nenhum pedido de recuperação ativo para este utilizador. Solicite um novo código.',
+        });
+      }
+
+      if (Date.now() > entry.expiresAt) {
+        accountRecoveryStore.delete(found.email.toLowerCase());
+        return res.status(400).json({
+          success: false,
+          error: 'O código de recuperação expirou (validade de 5 minutos excedida).',
+        });
+      }
+
+      if (entry.attempts >= 5) {
+        accountRecoveryStore.delete(found.email.toLowerCase());
+        return res.status(400).json({
+          success: false,
+          error: 'Limite de 5 tentativas excedido. Solicite um novo código por segurança.',
+        });
+      }
+
+      const inputHash = crypto.createHash('sha256').update(cleanCode).digest('hex');
+
+      if (inputHash !== entry.hash) {
+        entry.attempts += 1;
+        const remaining = 5 - entry.attempts;
+        return res.status(400).json({
+          success: false,
+          error: `Código incorreto. Tentativas restantes: ${remaining}.`,
+        });
+      }
+
+      // Atualizar palavra-passe e PIN do utilizador
+      found.password = cleanNewPass;
+      if (newPin && newPin.trim()) {
+        found.pin = newPin.trim();
+      }
+
+      // Invalidar código imediatamente (single use)
+      accountRecoveryStore.delete(found.email.toLowerCase());
+
+      // Registar auditoria
+      centralDatabase.auditLogs.unshift({
+        id: `aud_${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        userId: found.id,
+        userName: found.name,
+        userRole: found.role,
+        action: 'RECUPERACAO_PALAVRA_PASSE',
+        entity: 'Segurança',
+        details: `Palavra-passe de ${found.name} (${found.email}) redefinida com sucesso após validação de código OTP.`,
+        severity: 'normal',
+      });
+
+      return res.json({
+        success: true,
+        message: 'Palavra-passe redefinida com sucesso! Pode agora iniciar sessão com a nova palavra-passe.',
+        user: found,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: 'Erro ao redefinir palavra-passe.' });
+    }
+  });
+
+  // ==================== 6. SINCRONIZAÇÃO E PERSISTÊNCIA CENTRAL ====================
   app.post('/api/data/sync', (req, res) => {
     try {
       const { sales, cashTransactions, shiftClosures, auditLogs } = req.body;
@@ -899,13 +1159,17 @@ async function startServer() {
     if (req.headers['x-test-suite'] !== 'internal-pdv-mz') {
       return res.status(403).json({ error: 'Acesso não autorizado.' });
     }
-    const { requestId, adminEmail } = req.body;
+    const { requestId, adminEmail, recoveryEmail } = req.body;
     if (requestId) {
       const item = authRequests.get(requestId);
       return res.json({ code: item?.testCode });
     }
     if (adminEmail) {
       const item = adminOtpStore.get(adminEmail.toLowerCase().trim());
+      return res.json({ code: item?.testCode });
+    }
+    if (recoveryEmail) {
+      const item = accountRecoveryStore.get(recoveryEmail.toLowerCase().trim());
       return res.json({ code: item?.testCode });
     }
     return res.status(400).json({ error: 'Nenhum alvo especificado.' });

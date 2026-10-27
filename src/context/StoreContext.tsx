@@ -93,6 +93,8 @@ interface StoreContextType {
   validateCashierAccessCode: (requestId: string, code: string) => Promise<{ success: boolean; user?: User; error?: string }>;
   requestAdminOtp: (email: string, password: string) => Promise<{ success: boolean; maskedEmail?: string; message?: string; error?: string }>;
   verifyAdminOtp: (email: string, code: string) => Promise<{ success: boolean; user?: User; error?: string }>;
+  requestAccountRecovery: (params: { identifier: string }) => Promise<{ success: boolean; maskedEmail?: string; message?: string; userName?: string; userEmail?: string; role?: Role; error?: string }>;
+  confirmAccountRecovery: (params: { identifier: string; code: string; newPassword: string; newPin?: string }) => Promise<{ success: boolean; message?: string; user?: User; error?: string }>;
 
   // Stores
   stores: Store[];
@@ -856,6 +858,60 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return { success: false, error: 'Falha ao validar código do Administrador Geral.' };
     }
   }, []);
+
+  // Solicitar recuperação de conta
+  const requestAccountRecovery = useCallback(async (params: { identifier: string }) => {
+    try {
+      const res = await fetch('/api/auth/recover-account/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      const data = await res.json();
+      return data;
+    } catch {
+      return { success: false, error: 'Falha de comunicação ao solicitar recuperação de conta.' };
+    }
+  }, []);
+
+  // Confirmar código e redefinir palavra-passe
+  const confirmAccountRecovery = useCallback(
+    async (params: { identifier: string; code: string; newPassword: string; newPin?: string }) => {
+      try {
+        const res = await fetch('/api/auth/recover-account/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(params),
+        });
+        const data = await res.json();
+        if (data.success && data.user) {
+          // Atualizar utilizador no estado local e persistência
+          setUsers((prev) =>
+            prev.map((u) =>
+              u.id === data.user.id
+                ? {
+                    ...u,
+                    password: params.newPassword.trim(),
+                    ...(params.newPin ? { pin: params.newPin.trim() } : {}),
+                  }
+                : u
+            )
+          );
+          sound.success();
+          addAuditLog(
+            'RECUPERACAO_CONTA',
+            'Segurança',
+            `Palavra-passe de ${data.user.name} redefinida com sucesso via validação de código OTP`,
+            'normal'
+          );
+        }
+        return data;
+      } catch {
+        return { success: false, error: 'Falha de comunicação ao redefinir palavra-passe.' };
+      }
+    },
+    [addAuditLog]
+  );
 
   // Customer Management & Loyalty Discount
   const addCustomer = (custData: Omit<Customer, 'id' | 'createdAt'>) => {
@@ -1809,6 +1865,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         validateCashierAccessCode,
         requestAdminOtp,
         verifyAdminOtp,
+        requestAccountRecovery,
+        confirmAccountRecovery,
         stores,
         selectedAdminStoreId,
         setSelectedAdminStoreId,

@@ -349,6 +349,79 @@ async function runTestSuite() {
     recordTest(10, 'Persistência Central de Vendas & Sincronização Multi-Dispositivo', false, err.message);
   }
 
+  // Teste 11: Solicitação de Recuperação de Conta (Código Enviado ao Administrador Geral)
+  let recoveryTestCode = '';
+  try {
+    const res = await fetch(`${BASE_URL}/api/auth/recover-account/request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: 'Amélia Cossa' }),
+    });
+    const data = await res.json();
+    const isCodeNotExposed = !data.code && !data.otpCode;
+    const isEmailRoutedToAdmin = data.maskedEmail.includes('k***s@gmail.com');
+
+    // Recuperar código internamente para o verificador de testes
+    const codeRes = await fetch(`${BASE_URL}/api/test/get-request-code`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-test-suite': 'internal-pdv-mz',
+      },
+      body: JSON.stringify({ recoveryEmail: 'amelia.caixa@gmail.com' }),
+    });
+    const codeData = await codeRes.json();
+    recoveryTestCode = codeData.code || '';
+
+    const passed = data.success === true && isCodeNotExposed && isEmailRoutedToAdmin && recoveryTestCode.length === 6;
+    recordTest(
+      11,
+      'Recuperação de Conta: Pedido Registado & Código Enviado ao Administrador',
+      passed,
+      `Sucesso: ${data.success}, Destinatário: ${data.maskedEmail}, Código Não Exposto ao Solicitante: ${isCodeNotExposed}`
+    );
+  } catch (err: any) {
+    recordTest(11, 'Recuperação de Conta: Pedido Registado & Código Enviado ao Administrador', false, err.message);
+  }
+
+  // Teste 12: Confirmação de Código de Recuperação & Redefinição de Nova Senha
+  try {
+    const newTestPassword = 'novaSenha@2026';
+    const res = await fetch(`${BASE_URL}/api/auth/recover-account/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        identifier: 'amelia.caixa@gmail.com',
+        code: recoveryTestCode,
+        newPassword: newTestPassword,
+        newPin: '9999',
+      }),
+    });
+    const data = await res.json();
+
+    // Validar se o utilizador consegue agora autenticar-se com a nova palavra-passe
+    const loginAttempt = await fetch(`${BASE_URL}/api/auth/cashier/create-request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        identifier: 'amelia.caixa@gmail.com',
+        passwordOrPin: newTestPassword,
+        storeId: 'store_1',
+      }),
+    });
+    const loginData = await loginAttempt.json();
+
+    const passed = data.success === true && loginData.success === true;
+    recordTest(
+      12,
+      'Recuperação de Conta: Redefinição de Nova Palavra-passe & Autenticação Confirmada',
+      passed,
+      `Nova Senha Aceite: ${data.success}, Sessão Autorizada com Nova Senha: ${loginData.success}`
+    );
+  } catch (err: any) {
+    recordTest(12, 'Recuperação de Conta: Redefinição de Nova Palavra-passe & Autenticação Confirmada', false, err.message);
+  }
+
   // Relatório Final dos Testes
   console.log('\n================================================================');
   console.log('              RESUMO EXECUTIVO DOS TESTES REALIZADOS            ');
