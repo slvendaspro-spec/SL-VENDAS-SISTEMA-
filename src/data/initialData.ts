@@ -131,7 +131,7 @@ export const INITIAL_USERS: User[] = [
     assignedStoreName: 'Todas as Lojas (Acesso Geral)',
     pin: '1234',
     password: 'admin123',
-    phone: '+258 84 777 0000',
+    phone: '+258 87 784 6559',
     identificationNumber: '110203040506M',
     avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
     isActive: true,

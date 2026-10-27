@@ -88,12 +88,12 @@ interface StoreContextType {
   pendingAuthRequests: AuthRequest[];
   fetchPendingAuthRequests: () => Promise<void>;
   decideAuthRequest: (requestId: string, decision: 'APPROVE' | 'REJECT', reason?: string) => Promise<{ success: boolean; message?: string }>;
-  requestCashierAccess: (params: { identifier: string; passwordOrPin: string; storeId: string; role: Role; companyName?: string }) => Promise<{ success: boolean; requestId?: string; status?: string; message?: string; expiresAt?: number; adminMaskedEmail?: string; userName?: string; storeName?: string; error?: string }>;
+  requestCashierAccess: (params: { identifier: string; passwordOrPin: string; storeId: string; role: Role; companyName?: string }) => Promise<{ success: boolean; requestId?: string; status?: string; message?: string; expiresAt?: number; adminMaskedEmail?: string; adminWhatsApp?: string; whatsappDirectUrl?: string; userName?: string; storeName?: string; error?: string }>;
   checkCashierRequestStatus: (requestId: string) => Promise<{ success: boolean; status: string; user?: User; error?: string }>;
   validateCashierAccessCode: (requestId: string, code: string) => Promise<{ success: boolean; user?: User; error?: string }>;
-  requestAdminOtp: (email: string, password: string) => Promise<{ success: boolean; maskedEmail?: string; message?: string; error?: string }>;
+  requestAdminOtp: (email: string, password: string) => Promise<{ success: boolean; maskedEmail?: string; whatsappPhone?: string; whatsappDirectUrl?: string; message?: string; error?: string }>;
   verifyAdminOtp: (email: string, code: string) => Promise<{ success: boolean; user?: User; error?: string }>;
-  requestAccountRecovery: (params: { identifier: string }) => Promise<{ success: boolean; maskedEmail?: string; message?: string; userName?: string; userEmail?: string; role?: Role; error?: string }>;
+  requestAccountRecovery: (params: { identifier: string }) => Promise<{ success: boolean; maskedEmail?: string; adminWhatsApp?: string; whatsappDirectUrl?: string; message?: string; userName?: string; userEmail?: string; role?: Role; error?: string }>;
   confirmAccountRecovery: (params: { identifier: string; code: string; newPassword: string; newPin?: string }) => Promise<{ success: boolean; message?: string; user?: User; error?: string }>;
 
   // Stores

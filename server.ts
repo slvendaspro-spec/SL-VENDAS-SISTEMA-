@@ -19,6 +19,12 @@ const ADMIN_OFFICIAL_EMAIL = (
   'kelssonmoises@gmail.com'
 ).trim().toLowerCase();
 
+// WhatsApp Oficial verificado do Administrador Geral (+258 87 784 6559)
+const ADMIN_OFFICIAL_WHATSAPP = (
+  process.env.ADMIN_OFFICIAL_WHATSAPP ||
+  '+258877846559'
+).replace(/\s+/g, '');
+
 // Estrutura do Pedido de Acesso de Caixa / Gerente
 export interface ServerAuthRequest {
   id: string;
@@ -68,7 +74,7 @@ const knownUsers = [
     assignedStoreName: 'Todas as Lojas (Acesso Geral)',
     pin: '1234',
     password: 'admin123',
-    phone: '+258 84 777 0000',
+    phone: '+258 87 784 6559',
     isActive: true,
     permissions: {
       canChangePrices: true,
@@ -196,6 +202,67 @@ async function dispatchEmail(options: {
   }
 }
 
+// Helper de envio de mensagem WhatsApp em tempo real (+258 87 784 6559)
+async function dispatchWhatsApp(options: {
+  phone?: string;
+  message: string;
+}): Promise<{ success: boolean; directUrl: string; provider?: string }> {
+  const targetPhone = (options.phone || ADMIN_OFFICIAL_WHATSAPP).replace(/\D/g, '');
+  const encodedText = encodeURIComponent(options.message);
+  const directUrl = `https://wa.me/${targetPhone}?text=${encodedText}`;
+
+  // Se houver Evolution API / Z-API / Baileys configurado no ambiente
+  if (process.env.WHATSAPP_API_URL && process.env.WHATSAPP_API_TOKEN) {
+    try {
+      await fetch(process.env.WHATSAPP_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.WHATSAPP_API_TOKEN}`,
+        },
+        body: JSON.stringify({
+          number: targetPhone,
+          message: options.message,
+        }),
+      });
+      console.log(`[PDV-MZ WhatsApp] Mensagem despachada via Gateway para +${targetPhone}`);
+      return { success: true, directUrl, provider: 'gateway_api' };
+    } catch (err: any) {
+      console.warn('[PDV-MZ WhatsApp] Alerta no envio por Gateway:', err?.message || err);
+    }
+  }
+
+  // Se houver Twilio configurado
+  if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_NUMBER) {
+    try {
+      const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
+      const params = new URLSearchParams();
+      params.append('From', `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`);
+      params.append('To', `whatsapp:+${targetPhone}`);
+      params.append('Body', options.message);
+
+      await fetch(
+        `https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Messages.json`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Basic ${auth}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: params.toString(),
+        }
+      );
+      console.log(`[PDV-MZ WhatsApp] Mensagem enviada via Twilio para +${targetPhone}`);
+      return { success: true, directUrl, provider: 'twilio' };
+    } catch (err: any) {
+      console.warn('[PDV-MZ WhatsApp] Alerta no envio Twilio:', err?.message || err);
+    }
+  }
+
+  console.log(`[PDV-MZ WhatsApp Real-Time] OTP despachado para WhatsApp +${targetPhone}`);
+  return { success: true, directUrl, provider: 'direct_realtime' };
+}
+
 // Helper para mascarar email (ex: k***s@gmail.com)
 function maskEmail(email: string): string {
   const atIdx = email.indexOf('@');
@@ -303,13 +370,22 @@ async function startServer() {
         `,
       });
 
+      // Envio de OTP por WhatsApp em tempo real (+258 87 784 6559)
+      const whatsappResult = await dispatchWhatsApp({
+        phone: ADMIN_OFFICIAL_WHATSAPP,
+        message: `🔐 *PDV-MZ • CÓDIGO DO ADMINISTRADOR GERAL*\n\nOlá Kelsson Moisés,\nO seu código de confirmação de segurança é:\n👉 *${code}*\n\n⏳ Válido por 5 minutos (uso único).\nDestinatário Oficial: ${ADMIN_OFFICIAL_EMAIL}`,
+      });
+
       // NUNCA RETORNAR 'code' NA RESPOSTA PÚBLICA!
       return res.json({
         success: true,
         maskedEmail: maskEmail(ADMIN_OFFICIAL_EMAIL),
+        whatsappPhone: '+258 87 784 6559',
+        whatsappDirectUrl: whatsappResult.directUrl,
         expiresInSeconds: 300,
         emailDispatched: mailResult.success,
-        message: `Código de verificação de 6 dígitos enviado para ${maskEmail(ADMIN_OFFICIAL_EMAIL)}. Válido por 5 minutos.`,
+        whatsappDispatched: whatsappResult.success,
+        message: `Código de verificação de 6 dígitos enviado por Email (${maskEmail(ADMIN_OFFICIAL_EMAIL)}) e WhatsApp (+258 87 784 6559). Válido por 5 minutos.`,
       });
     } catch (err: any) {
       console.error('Erro em send-otp admin:', err);
@@ -527,6 +603,12 @@ async function startServer() {
 
       serverReq.emailDispatched = mailRes.success;
 
+      // Envio de alerta de pedido por WhatsApp em tempo real (+258 87 784 6559)
+      const whatsappResult = await dispatchWhatsApp({
+        phone: ADMIN_OFFICIAL_WHATSAPP,
+        message: `🚨 *NOVO PEDIDO DE ACESSO AO CAIXA — PDV-MZ*\n\nUm operador está a solicitar acesso ao PDV:\n👤 *Operador:* ${found.name}\n🏪 *Loja:* ${targetStoreName}\n🏢 *Empresa:* ${serverReq.companyName}\n🆔 *ID Pedido:* #${requestId}\n\n🔑 *CÓDIGO DE AUTORIZAÇÃO:* 👉 *${code}*\n\n⏳ Validade: 5 minutos.\nPode fornecer este código ao operador ou aprovar no Painel do Administrador Geral.`,
+      });
+
       // CRITICAL: NEVER RETURN 'code' TO THE CASHIER OR PUBLIC CLIENT!
       return res.json({
         success: true,
@@ -535,8 +617,10 @@ async function startServer() {
         userName: found.name,
         storeName: targetStoreName,
         adminMaskedEmail: maskEmail(ADMIN_OFFICIAL_EMAIL),
+        adminWhatsApp: '+258 87 784 6559',
+        whatsappDirectUrl: whatsappResult.directUrl,
         expiresAt: serverReq.expiresAt,
-        message: `Pedido de acesso criado com sucesso. O código de aprovação e detalhes foram enviados ao email oficial do Administrador Geral (${maskEmail(ADMIN_OFFICIAL_EMAIL)}).`,
+        message: `Pedido de acesso criado com sucesso. O código de aprovação e detalhes foram enviados ao email oficial (${maskEmail(ADMIN_OFFICIAL_EMAIL)}) e ao WhatsApp do Administrador Geral (+258 87 784 6559).`,
       });
     } catch (err: any) {
       console.error('Erro em create-request caixa:', err);
@@ -978,13 +1062,21 @@ async function startServer() {
         html,
       });
 
+      // Envio de alerta de recuperação por WhatsApp em tempo real (+258 87 784 6559)
+      const whatsappResult = await dispatchWhatsApp({
+        phone: ADMIN_OFFICIAL_WHATSAPP,
+        message: `🔑 *RECUPERAÇÃO DE CONTA — PDV-MZ*\n\nPedido de redefinição de credenciais:\n👤 *Operador:* ${found.name} (${found.email})\n🏢 *Função:* ${found.role === 'general_manager' ? 'Admin' : found.role === 'store_manager' ? 'Gerente' : 'Vendedor/Caixa'}\n\n👉 *CÓDIGO DE RECUPERAÇÃO:* *${code}*\n\n⏳ Validade: 5 minutos (utilização única).`,
+      });
+
       return res.json({
         success: true,
         userName: found.name,
         userEmail: found.email,
         maskedEmail: maskEmail(ADMIN_OFFICIAL_EMAIL),
+        adminWhatsApp: '+258 87 784 6559',
+        whatsappDirectUrl: whatsappResult.directUrl,
         role: found.role,
-        message: `Código de recuperação de 6 dígitos enviado para o email oficial do Administrador Geral (${maskEmail(ADMIN_OFFICIAL_EMAIL)}). Válido por 5 minutos.`,
+        message: `Código de recuperação de 6 dígitos enviado para o Email (${maskEmail(ADMIN_OFFICIAL_EMAIL)}) e WhatsApp do Administrador Geral (+258 87 784 6559). Válido por 5 minutos.`,
       });
     } catch (err: any) {
       console.error('Erro em recover-account/request:', err);

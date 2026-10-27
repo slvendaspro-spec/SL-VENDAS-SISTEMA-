@@ -22,6 +22,8 @@ import {
   Users,
   Key,
   ShieldAlert,
+  ExternalLink,
+  MessageSquare,
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { sound } from '../../services/soundService';
@@ -60,6 +62,8 @@ export const LoginPortal: React.FC = () => {
   // Estado do Pedido de Aprovação (Opção B)
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
   const [requestAdminMaskedEmail, setRequestAdminMaskedEmail] = useState<string>('k***s@gmail.com');
+  const [adminWhatsAppNotice, setAdminWhatsAppNotice] = useState<string>('+258 87 784 6559');
+  const [whatsappDirectLink, setWhatsappDirectLink] = useState<string | null>(null);
   const [pendingStoreName, setPendingStoreName] = useState<string>('');
   const [pendingUserName, setPendingUserName] = useState<string>('');
 
@@ -147,6 +151,7 @@ export const LoginPortal: React.FC = () => {
     setErrorMessage(null);
     setSuccessNotice(null);
     setActiveRequestId(null);
+    setWhatsappDirectLink(null);
     setAuthStep(1);
     setRecoveryStep(1);
     setCountdown(300);
@@ -198,7 +203,11 @@ export const LoginPortal: React.FC = () => {
         if (res.success) {
           sound.success();
           setRequestAdminMaskedEmail(res.maskedEmail || 'k***s@gmail.com');
-          setSuccessNotice(res.message || 'Código de confirmação enviado para o Gmail oficial.');
+          setAdminWhatsAppNotice(res.whatsappPhone || '+258 87 784 6559');
+          setWhatsappDirectLink(res.whatsappDirectUrl || null);
+          setSuccessNotice(
+            res.message || 'Código de confirmação enviado para o Gmail e WhatsApp oficiais (+258 87 784 6559).'
+          );
           setAuthStep(2);
           setCountdown(300);
           setCanResend(false);
@@ -208,7 +217,7 @@ export const LoginPortal: React.FC = () => {
         }
       } else {
         // OPÇÃO B: GERENTE / VENDEDOR / CAIXA
-        // Cria pedido e envia código EXCLUSIVAMENTE para kelssonmoises@gmail.com
+        // Cria pedido e envia código EXCLUSIVAMENTE para kelssonmoises@gmail.com e WhatsApp +258 87 784 6559
         const res = await requestCashierAccess({
           identifier: cleanId,
           passwordOrPin: cleanPass,
@@ -221,10 +230,12 @@ export const LoginPortal: React.FC = () => {
           sound.success();
           setActiveRequestId(res.requestId);
           setRequestAdminMaskedEmail(res.adminMaskedEmail || 'k***s@gmail.com');
+          setAdminWhatsAppNotice(res.adminWhatsApp || '+258 87 784 6559');
+          setWhatsappDirectLink(res.whatsappDirectUrl || null);
           setPendingStoreName(res.storeName || 'Loja Selecionada');
           setPendingUserName(res.userName || cleanId);
           setSuccessNotice(
-            `Pedido #${res.requestId} criado. Notificação e código de aprovação enviados para o Gmail oficial do Administrador Geral (${res.adminMaskedEmail || 'k***s@gmail.com'}).`
+            `Pedido #${res.requestId} criado. Notificação e código de aprovação enviados em tempo real para o Gmail oficial (${res.adminMaskedEmail || 'k***s@gmail.com'}) e WhatsApp (${res.adminWhatsApp || '+258 87 784 6559'}) do Administrador Geral.`
           );
           setAuthStep(2);
           setCountdown(300);
@@ -320,9 +331,11 @@ export const LoginPortal: React.FC = () => {
       if (res.success) {
         sound.success();
         setRequestAdminMaskedEmail(res.maskedEmail || 'k***s@gmail.com');
+        setAdminWhatsAppNotice(res.adminWhatsApp || '+258 87 784 6559');
+        setWhatsappDirectLink(res.whatsappDirectUrl || null);
         setRecoveryUserNotice(`${res.userName} (${res.userEmail})`);
         setSuccessNotice(
-          `Código de recuperação de 6 dígitos gerado e enviado para o email oficial do Administrador Geral (${res.maskedEmail || 'k***s@gmail.com'}).`
+          `Código de recuperação de 6 dígitos gerado e enviado para o email (${res.maskedEmail || 'k***s@gmail.com'}) e WhatsApp oficial do Administrador Geral (${res.adminWhatsApp || '+258 87 784 6559'}).`
         );
         setRecoveryStep(2);
         setCountdown(300);
@@ -532,13 +545,13 @@ export const LoginPortal: React.FC = () => {
               </div>
 
               {/* Informação sobre o Fluxo de Segurança */}
-              <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 text-xs text-slate-400 space-y-1.5 text-center">
+              <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 text-xs text-slate-400 space-y-2 text-center">
                 <p className="text-slate-300 font-semibold flex items-center justify-center gap-1.5">
                   <Lock className="w-3.5 h-3.5 text-blue-400" /> Regra Absoluta de Segurança Centralizada
                 </p>
                 <p className="text-[11px] leading-relaxed">
-                  Os códigos de aprovação e pedidos de abertura de caixa são enviados exclusivamente para o email oficial
-                  do Administrador Geral (<strong className="text-slate-200">kelssonmoises@gmail.com</strong>).
+                  Os códigos de aprovação e pedidos de abertura de caixa são enviados em tempo real exclusivamente para o email oficial
+                  (<strong className="text-slate-200">kelssonmoises@gmail.com</strong>) e WhatsApp (<strong className="text-emerald-400 font-mono">+258 87 784 6559</strong>) do Administrador Geral.
                 </p>
               </div>
             </div>
@@ -752,20 +765,20 @@ export const LoginPortal: React.FC = () => {
               </div>
 
               {/* Banner Informativo do Pedido */}
-              <div className="mb-5 p-4 rounded-2xl bg-slate-950 border border-slate-800 text-xs space-y-2">
+              <div className="mb-5 p-4 rounded-2xl bg-slate-950 border border-slate-800 text-xs space-y-2.5">
                 <div className="flex items-center justify-between text-slate-300">
                   <span className="flex items-center gap-1.5 font-bold">
                     <Mail className="w-3.5 h-3.5 text-blue-400" />
                     {activePortal === 'ADMIN' ? 'Destinatário Oficial:' : 'Código Enviado Exclusivamente ao Administrador:'}
                   </span>
-                  <span className="font-mono text-amber-400 flex items-center gap-1">
+                  <span className="font-mono text-amber-400 flex items-center gap-1 font-bold">
                     <Clock className="w-3 h-3" /> {minutesLeft}:{secondsLeft < 10 ? `0${secondsLeft}` : secondsLeft}
                   </span>
                 </div>
 
                 <div className="text-[11px] text-slate-400 space-y-1">
                   <p>
-                    Gmail do Administrador: <strong className="text-white font-mono">{requestAdminMaskedEmail}</strong>
+                    Gmail Oficial: <strong className="text-white font-mono">{requestAdminMaskedEmail}</strong>
                   </p>
                   {activePortal === 'CASHIER' && (
                     <>
@@ -782,9 +795,34 @@ export const LoginPortal: React.FC = () => {
                   )}
                 </div>
 
+                {/* Notificação WhatsApp em Tempo Real */}
+                <div className="pt-2 border-t border-slate-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 bg-emerald-950/40 border border-emerald-500/20 rounded-xl p-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    </span>
+                    <span className="text-[11px] text-emerald-300 font-medium flex items-center gap-1.5">
+                      <Phone className="w-3.5 h-3.5 text-emerald-400" />
+                      WhatsApp em Tempo Real: <strong className="font-mono text-emerald-200">{adminWhatsAppNotice}</strong>
+                    </span>
+                  </div>
+                  {whatsappDirectLink && (
+                    <a
+                      href={whatsappDirectLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-500 active:scale-95 py-1 px-2.5 rounded-lg transition-all shadow cursor-pointer shrink-0"
+                    >
+                      <span>Abrir no WhatsApp</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
+                </div>
+
                 {activePortal === 'CASHIER' && (
-                  <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center gap-2 text-[10px] text-emerald-400 animate-pulse">
-                    <RefreshCw className="w-3 h-3 animate-spin" />
+                  <div className="pt-1 flex items-center gap-2 text-[10px] text-emerald-400 animate-pulse">
+                    <RefreshCw className="w-3 h-3 animate-spin shrink-0" />
                     <span>Deteção em tempo real: Se o Administrador aprovar no painel dele, o acesso abre automaticamente.</span>
                   </div>
                 )}
@@ -877,14 +915,30 @@ export const LoginPortal: React.FC = () => {
               </div>
 
               {/* Informação sobre Segurança */}
-              <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 text-xs text-slate-300 space-y-1 mb-5">
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 text-xs text-slate-300 space-y-2 mb-5">
                 <p className="font-semibold text-amber-300 flex items-center gap-1.5">
                   <ShieldAlert className="w-3.5 h-3.5" /> Confirmação Centralizada de Segurança
                 </p>
                 <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Por norma de auditoria, o código de 6 dígitos para redefinição é enviado para o email oficial
-                  do Administrador Geral (<strong className="text-white font-mono">{requestAdminMaskedEmail}</strong>).
+                  Por norma de auditoria, o código de 6 dígitos para redefinição é enviado em tempo real para o email oficial
+                  (<strong className="text-white font-mono">{requestAdminMaskedEmail}</strong>) e WhatsApp (<strong className="text-emerald-400 font-mono">{adminWhatsAppNotice}</strong>) do Administrador Geral.
                 </p>
+                {whatsappDirectLink && recoveryStep === 2 && (
+                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
+                    <span className="text-[11px] text-emerald-400 flex items-center gap-1">
+                      <Phone className="w-3 h-3" /> Notificação enviada via WhatsApp
+                    </span>
+                    <a
+                      href={whatsappDirectLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-500 py-1 px-2.5 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <span>Abrir no WhatsApp</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                )}
               </div>
 
               {successNotice && (

@@ -422,6 +422,33 @@ async function runTestSuite() {
     recordTest(12, 'Recuperação de Conta: Redefinição de Nova Palavra-passe & Autenticação Confirmada', false, err.message);
   }
 
+  // Teste 13: Envio de OTP e Alerta em Tempo Real via WhatsApp para +258 87 784 6559
+  try {
+    const res = await fetch(`${BASE_URL}/api/auth/admin/send-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'kelssonmoises@gmail.com',
+        password: 'admin123',
+      }),
+    });
+    const data = await res.json();
+    const isSuccess = data.success === true;
+    const hasWhatsAppNumber = data.whatsappPhone === '+258 87 784 6559';
+    const hasDirectLink = typeof data.whatsappDirectUrl === 'string' && data.whatsappDirectUrl.includes('258877846559');
+    const isCodeNotExposed = !data.code && !data.otp;
+
+    const passed = isSuccess && hasWhatsAppNumber && hasDirectLink && isCodeNotExposed;
+    recordTest(
+      13,
+      'Envio de OTP e Alerta em Tempo Real via WhatsApp (+258 87 784 6559)',
+      passed,
+      `WhatsApp: ${data.whatsappPhone}, Link Direto Gerado: ${hasDirectLink ? 'Sim (wa.me/258877846559)' : 'Não'}, Código Protegido: ${isCodeNotExposed}`
+    );
+  } catch (err: any) {
+    recordTest(13, 'Envio de OTP e Alerta em Tempo Real via WhatsApp (+258 87 784 6559)', false, err.message);
+  }
+
   // Relatório Final dos Testes
   console.log('\n================================================================');
   console.log('              RESUMO EXECUTIVO DOS TESTES REALIZADOS            ');
