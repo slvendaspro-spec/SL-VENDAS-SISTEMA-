@@ -1,4 +1,23 @@
-export type Role = 'general_manager' | 'cashier';
+export type Role = 'general_manager' | 'cashier' | 'store_manager';
+
+export interface AuthRequest {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  userRole: Role;
+  companyName: string;
+  storeId: string;
+  storeName: string;
+  requestedAt: string;
+  expiresAt: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
+  approvedBy?: string;
+  approvedAt?: string;
+  rejectionReason?: string;
+  attempts: number;
+  deviceId?: string;
+}
 
 export type PaymentMethod = 'M_PESA' | 'E_MOLA' | 'DINHEIRO' | 'POS_CARTAO' | 'TRANSFERENCIA';
 

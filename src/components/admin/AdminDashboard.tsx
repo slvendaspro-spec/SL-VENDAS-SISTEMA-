@@ -40,6 +40,9 @@ import {
   Flame,
   Archive,
   Folder,
+  KeyRound,
+  CheckCircle2,
+  X,
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { Product, Store, User, PaymentMethod, Expense, AuthorizedDevice, Sale } from '../../types';
@@ -108,6 +111,9 @@ export const AdminDashboard: React.FC = () => {
     exportBackup,
     restoreBackup,
     resetToDefaultData,
+    pendingAuthRequests,
+    decideAuthRequest,
+    fetchPendingAuthRequests,
   } = useStore();
 
   const [isProductCameraOpen, setIsProductCameraOpen] = useState(false);
@@ -157,6 +163,7 @@ export const AdminDashboard: React.FC = () => {
     | 'products'
     | 'sales'
     | 'users'
+    | 'approvals'
     | 'devices'
     | 'sessions'
     | 'notifications'
@@ -286,6 +293,15 @@ export const AdminDashboard: React.FC = () => {
             { id: 'stores', label: `Lojas (${stores.length})`, icon: StoreIcon },
             { id: 'products', label: `Estoque (${products.length})`, icon: Package },
             { id: 'sales', label: `Vendas (${filteredSales.length})`, icon: ShoppingCart },
+            {
+              id: 'approvals',
+              label:
+                pendingAuthRequests.filter((r) => r.status === 'PENDING').length > 0
+                  ? `🚨 Aprovações (${pendingAuthRequests.filter((r) => r.status === 'PENDING').length})`
+                  : 'Aprovações de Caixa',
+              icon: KeyRound,
+              badgeAlert: pendingAuthRequests.filter((r) => r.status === 'PENDING').length > 0,
+            },
             { id: 'users', label: `Usuários (${users.length})`, icon: Users },
             { id: 'devices', label: `Dispositivos (${devices.length})`, icon: ShieldCheck },
             { id: 'sessions', label: `Sessões / Turnos (${shiftClosures.length})`, icon: Clock },
@@ -1459,6 +1475,174 @@ export const AdminDashboard: React.FC = () => {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* ===================== TAB: CENTRAL DE APROVAÇÕES DE CAIXA ===================== */}
+        {adminTab === 'approvals' && (
+          <div className="space-y-6 animate-in fade-in duration-200">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-bold text-white">Central de Aprovações de Acesso ao Caixa</h2>
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-950 text-amber-300 border border-amber-500/40">
+                    {pendingAuthRequests.filter((r) => r.status === 'PENDING').length} Pendentes
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400">
+                  Regra Master: Todos os pedidos de abertura e acesso aos PDVs geram código e chegam exclusivamente ao Administrador Geral.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => fetchPendingAuthRequests()}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white flex items-center justify-center gap-2 border border-slate-700 cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Atualizar Pedidos</span>
+              </button>
+            </div>
+
+            {/* Pedidos Pendentes Ativos */}
+            <div className="space-y-4">
+              <h3 className="text-sm font-bold text-amber-400 uppercase tracking-wider flex items-center gap-2">
+                <Clock className="w-4 h-4" />
+                <span>Pedidos a Aguardar Decisão do Administrador:</span>
+              </h3>
+
+              {pendingAuthRequests.filter((r) => r.status === 'PENDING').length === 0 ? (
+                <div className="p-8 rounded-3xl bg-slate-900/60 border border-slate-800 text-center space-y-2">
+                  <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto" />
+                  <p className="text-sm font-bold text-white">Nenhum Pedido Pendente</p>
+                  <p className="text-xs text-slate-400 max-w-md mx-auto">
+                    Não existem caixas ou operadores a aguardar aprovação no momento. Quando um operador tentar iniciar sessão, o pedido surgirá aqui e no seu Gmail imediatamente.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {pendingAuthRequests
+                    .filter((r) => r.status === 'PENDING')
+                    .map((req) => (
+                      <div
+                        key={req.id}
+                        className="p-5 rounded-3xl bg-slate-900 border-2 border-amber-500/50 shadow-2xl space-y-4 relative"
+                      >
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <span className="font-mono text-xs font-bold text-amber-400 bg-amber-950/80 px-2.5 py-1 rounded-lg border border-amber-500/40 inline-block mb-1">
+                              #{req.id}
+                            </span>
+                            <h4 className="font-bold text-base text-white">{req.userName}</h4>
+                            <p className="text-xs text-slate-400">{req.userEmail}</p>
+                          </div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-amber-900/40 text-amber-300 border border-amber-500/30">
+                            {req.userRole === 'general_manager' ? 'Admin' : req.userRole === 'store_manager' ? 'Gerente' : 'Vendedor / Caixa'}
+                          </span>
+                        </div>
+
+                        <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 text-xs space-y-1">
+                          <p className="text-slate-300">
+                            <span className="text-slate-400 font-medium">Loja Solicitada:</span>{' '}
+                            <strong className="text-white">{req.storeName}</strong>
+                          </p>
+                          <p className="text-slate-300">
+                            <span className="text-slate-400 font-medium">Empresa:</span>{' '}
+                            <strong className="text-white">{req.companyName}</strong>
+                          </p>
+                          <p className="text-slate-400 text-[11px]">
+                            Solicitado em: {new Date(req.requestedAt).toLocaleTimeString('pt-MZ')} • Expira em 5 min
+                          </p>
+                        </div>
+
+                        {/* Botões de Decisão */}
+                        <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800">
+                          <button
+                            type="button"
+                            onClick={() => decideAuthRequest(req.id, 'APPROVE')}
+                            className="py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-950/50 cursor-pointer transition-all active:scale-98"
+                          >
+                            <Check className="w-4 h-4" />
+                            <span>Aprovar Acesso</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const reason = prompt('Motivo da rejeição:', 'Acesso não autorizado pelo Administrador');
+                              if (reason !== null) {
+                                decideAuthRequest(req.id, 'REJECT', reason);
+                              }
+                            }}
+                            className="py-2.5 px-3 rounded-xl bg-red-950/80 hover:bg-red-900 text-red-300 hover:text-white font-bold text-xs uppercase border border-red-500/40 flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-98"
+                          >
+                            <X className="w-4 h-4" />
+                            <span>Rejeitar</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+
+            {/* Histórico Recente de Pedidos */}
+            <div className="pt-4 border-t border-slate-800 space-y-3">
+              <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">
+                Histórico de Pedidos de Acesso:
+              </h3>
+              <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden shadow-xl">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-950/80 border-b border-slate-800 text-slate-400 font-semibold uppercase text-[10px]">
+                      <tr>
+                        <th className="p-3">ID Pedido</th>
+                        <th className="p-3">Operador</th>
+                        <th className="p-3">Loja</th>
+                        <th className="p-3">Horário</th>
+                        <th className="p-3">Estado</th>
+                        <th className="p-3">Aprovado Por / Motivo</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-mono">
+                      {pendingAuthRequests.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-4 text-center text-slate-500 font-sans">
+                            Nenhum registo histórico de pedidos.
+                          </td>
+                        </tr>
+                      ) : (
+                        pendingAuthRequests.map((r) => (
+                          <tr key={r.id} className="hover:bg-slate-800/30 transition-colors">
+                            <td className="p-3 text-slate-300 font-bold">#{r.id}</td>
+                            <td className="p-3 text-white font-sans font-medium">{r.userName}</td>
+                            <td className="p-3 text-slate-300 font-sans">{r.storeName}</td>
+                            <td className="p-3 text-slate-400">{new Date(r.requestedAt).toLocaleString('pt-MZ')}</td>
+                            <td className="p-3">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  r.status === 'APPROVED'
+                                    ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/40'
+                                    : r.status === 'REJECTED'
+                                    ? 'bg-red-950 text-red-300 border border-red-500/40'
+                                    : r.status === 'PENDING'
+                                    ? 'bg-amber-950 text-amber-300 border border-amber-500/40 animate-pulse'
+                                    : 'bg-slate-800 text-slate-400 border border-slate-700'
+                                }`}
+                              >
+                                {r.status}
+                              </span>
+                            </td>
+                            <td className="p-3 text-slate-400 font-sans">
+                              {r.approvedBy || r.rejectionReason || '—'}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           </div>
         )}

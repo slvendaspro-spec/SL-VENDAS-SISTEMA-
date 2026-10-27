@@ -22,6 +22,8 @@ import {
   ShiftClosure,
   DeviceViewMode,
   StoreRankingItem,
+  AuthRequest,
+  Role,
 } from '../types';
 import {
   INITIAL_STORES,
@@ -81,6 +83,16 @@ interface StoreContextType {
   setTwoFactorRequired: (val: boolean) => void;
   sendTwoFactorCode: (email: string, purpose?: string) => Promise<{ success: boolean; maskedEmail?: string; message?: string; error?: string }>;
   verifyTwoFactorCode: (email: string, code: string) => Promise<{ success: boolean; message?: string; error?: string }>;
+
+  // Mandatory Centralized Auth Flow (Requests routed to General Administrator)
+  pendingAuthRequests: AuthRequest[];
+  fetchPendingAuthRequests: () => Promise<void>;
+  decideAuthRequest: (requestId: string, decision: 'APPROVE' | 'REJECT', reason?: string) => Promise<{ success: boolean; message?: string }>;
+  requestCashierAccess: (params: { identifier: string; passwordOrPin: string; storeId: string; role: Role; companyName?: string }) => Promise<{ success: boolean; requestId?: string; status?: string; message?: string; expiresAt?: number; adminMaskedEmail?: string; userName?: string; storeName?: string; error?: string }>;
+  checkCashierRequestStatus: (requestId: string) => Promise<{ success: boolean; status: string; user?: User; error?: string }>;
+  validateCashierAccessCode: (requestId: string, code: string) => Promise<{ success: boolean; user?: User; error?: string }>;
+  requestAdminOtp: (email: string, password: string) => Promise<{ success: boolean; maskedEmail?: string; message?: string; error?: string }>;
+  verifyAdminOtp: (email: string, code: string) => Promise<{ success: boolean; user?: User; error?: string }>;
 
   // Stores
   stores: Store[];
@@ -250,6 +262,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const savedStore = localStorage.getItem(`${STORAGE_KEY}_cashierStoreId`);
     return savedStore || (currentUser.role === 'cashier' ? currentUser.assignedStoreId : 'store_1');
   });
+
+  // Pending Cashier/Manager access requests for General Administrator approval
+  const [pendingAuthRequests, setPendingAuthRequests] = useState<AuthRequest[]>([]);
 
   // Load products
   const [products, setProducts] = useState<Product[]>(() => {
@@ -698,6 +713,149 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
     }
   };
+
+  // ==================== FLUXO CENTRALIZADO DE APROVAÇÃO (ADMINISTRADOR GERAL) ====================
+
+  // Obter pedidos pendentes para o Administrador Geral
+  const fetchPendingAuthRequests = useCallback(async () => {
+    try {
+      const res = await fetch('/api/auth/admin/requests');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.requests)) {
+          setPendingAuthRequests(data.requests);
+        }
+      }
+    } catch (e) {
+      console.warn('Falha ao obter pedidos pendentes:', e);
+    }
+  }, []);
+
+  // Polling automático de pedidos pendentes quando o Administrador Geral está logado
+  useEffect(() => {
+    if (isAuthenticated && currentUser.role === 'general_manager') {
+      fetchPendingAuthRequests();
+      const interval = setInterval(fetchPendingAuthRequests, 4000);
+      return () => clearInterval(interval);
+    }
+  }, [isAuthenticated, currentUser.role, fetchPendingAuthRequests]);
+
+  // Administrador Geral decide (Aprova ou Rejeita) o pedido
+  const decideAuthRequest = useCallback(
+    async (requestId: string, decision: 'APPROVE' | 'REJECT', reason?: string) => {
+      try {
+        const res = await fetch('/api/auth/admin/decision', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requestId,
+            decision,
+            adminName: currentUser.name,
+            reason,
+          }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          await fetchPendingAuthRequests();
+          if (decision === 'APPROVE') {
+            sound.success();
+            addAuditLog(
+              'APROVACAO_ACESSO_CAIXA',
+              'Autenticação',
+              `Administrador Geral aprovou o acesso do pedido #${requestId}`,
+              'normal'
+            );
+          } else {
+            sound.playAlert();
+            addAuditLog(
+              'REJEICAO_ACESSO_CAIXA',
+              'Autenticação',
+              `Administrador Geral rejeitou o acesso do pedido #${requestId}. Motivo: ${reason || 'Não informado'}`,
+              'normal'
+            );
+          }
+        }
+        return data;
+      } catch {
+        return { success: false, message: 'Falha de comunicação ao processar decisão.' };
+      }
+    },
+    [currentUser.name, fetchPendingAuthRequests, addAuditLog]
+  );
+
+  // Solicitar acesso de Caixa / Gerente (cria pedido e envia código para kelssonmoises@gmail.com)
+  const requestCashierAccess = useCallback(
+    async (params: { identifier: string; passwordOrPin: string; storeId: string; role: Role; companyName?: string }) => {
+      try {
+        const res = await fetch('/api/auth/cashier/create-request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(params),
+        });
+        const data = await res.json();
+        return data;
+      } catch {
+        return { success: false, error: 'Falha de conexão com o servidor de autenticação.' };
+      }
+    },
+    []
+  );
+
+  // Polling de estado do pedido pelo Caixa
+  const checkCashierRequestStatus = useCallback(async (requestId: string) => {
+    try {
+      const res = await fetch(`/api/auth/cashier/request-status/${requestId}`);
+      const data = await res.json();
+      return data;
+    } catch {
+      return { success: false, status: 'ERROR', error: 'Falha ao consultar estado do pedido.' };
+    }
+  }, []);
+
+  // Validação do código de 6 dígitos no terminal do Caixa
+  const validateCashierAccessCode = useCallback(async (requestId: string, code: string) => {
+    try {
+      const res = await fetch('/api/auth/cashier/validate-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId, code }),
+      });
+      const data = await res.json();
+      return data;
+    } catch {
+      return { success: false, error: 'Falha de comunicação ao validar código.' };
+    }
+  }, []);
+
+  // Solicitar OTP do Administrador Geral
+  const requestAdminOtp = useCallback(async (email: string, password: string) => {
+    try {
+      const res = await fetch('/api/auth/admin/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+      return data;
+    } catch {
+      return { success: false, error: 'Falha ao solicitar código do Administrador Geral.' };
+    }
+  }, []);
+
+  // Validar OTP do Administrador Geral
+  const verifyAdminOtp = useCallback(async (email: string, code: string) => {
+    try {
+      const res = await fetch('/api/auth/admin/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code }),
+      });
+      const data = await res.json();
+      return data;
+    } catch {
+      return { success: false, error: 'Falha ao validar código do Administrador Geral.' };
+    }
+  }, []);
 
   // Customer Management & Loyalty Discount
   const addCustomer = (custData: Omit<Customer, 'id' | 'createdAt'>) => {
@@ -1643,6 +1801,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setTwoFactorRequired,
         sendTwoFactorCode,
         verifyTwoFactorCode,
+        pendingAuthRequests,
+        fetchPendingAuthRequests,
+        decideAuthRequest,
+        requestCashierAccess,
+        checkCashierRequestStatus,
+        validateCashierAccessCode,
+        requestAdminOtp,
+        verifyAdminOtp,
         stores,
         selectedAdminStoreId,
         setSelectedAdminStoreId,

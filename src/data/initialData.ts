@@ -174,6 +174,32 @@ export const INITIAL_USERS: User[] = [
       canAdjustStock: false,
     },
   },
+  {
+    id: 'user_gerente_1',
+    name: 'Mateus Macuácua (Gerente de Loja)',
+    email: 'mateus.gerente@gmail.com',
+    role: 'store_manager',
+    assignedStoreId: 'store_2',
+    assignedStoreName: 'Loja Matola Rio',
+    pin: '5678',
+    password: 'gerente123',
+    phone: '+258 84 200 3000',
+    identificationNumber: '110554433221G',
+    avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
+    isActive: true,
+    avatarColor: 'bg-indigo-600',
+    lastLogin: new Date().toISOString(),
+    permissions: {
+      canChangePrices: false,
+      canApplyDiscountsOverLimit: true,
+      canCancelSales: true,
+      canViewReports: true,
+      canManageProducts: true,
+      canManageUsers: false,
+      canManageStores: false,
+      canAdjustStock: true,
+    },
+  },
 ];
 
 // Modelos de Impressoras Portáteis e Pequenas para gestão de espaço do caixa
